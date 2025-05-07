@@ -13,7 +13,7 @@
 """
 Hetzner DNS Manager
 
-A command-line tool to interact with the Hetzner DNS API.
+A command-line tool with local database to interact with the Hetzner DNS API.
 
 Designed and implemented in 2025 by Steffen Beyer (and Claude Code).
 """
@@ -34,14 +34,8 @@ from rich.console import Console
 from rich.table import Table
 from ruamel.yaml import YAML
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-logger = logging.getLogger("dns-manager")
-
-# Set up console for rich output
-console = Console()
-
 # Constants
+VERSION = "0.1.0"
 API_BASE_URL = "https://dns.hetzner.com/api/v1"
 ZONES_DIR = pathlib.Path("./zones")
 
@@ -50,6 +44,13 @@ ZONES_DIR.mkdir(exist_ok=True)
 
 # Read API token from environment
 API_TOKEN = os.environ.get("HETZNER_DNS_API_TOKEN")
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("dns-manager")
+
+# Set up console for rich output
+console = Console()
 
 
 @dataclass
@@ -523,21 +524,36 @@ def check_dns_record(record, zone_name):
         return "missing"
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.option(
     "--dry",
     is_flag=True,
     help="Print the first API request that would be performed and then halt",
 )
+@click.option(
+    "--version",
+    is_flag=True,
+    help="Show the version and exit",
+)
 @click.pass_context
-def cli(ctx, dry):
+def cli(ctx, dry, version):
     """
-    Hetzner DNS Manager - A tool to manage DNS records using the Hetzner DNS API.
+    Hetzner DNS Manager - A tool to manage DNS records via the Hetzner DNS API using a local database.
 
-    This tool allows you to import, check, update, and delete DNS records.
+    The database consists of one YAML file per zone, stored in directory "./zones".
 
     The API token has to be provided via the HETZNER_DNS_API_TOKEN environment variable.
     """
+    # Show version and exit if requested
+    if version:
+        click.echo(f"{VERSION} (dns-manager)")
+        sys.exit(0)
+
+    # If no subcommand is invoked, show help
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+        sys.exit(0)
+
     if not API_TOKEN:
         console.print(
             "[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set."
