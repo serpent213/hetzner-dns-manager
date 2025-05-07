@@ -1,0 +1,556 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "click",
+#     "ruamel.yaml",
+#     "rich",
+#     "dnspython",
+#     "requests",
+# ]
+# ///
+"""
+Hetzner DNS Manager
+
+A command-line tool to interact with the Hetzner DNS API.
+"""
+import os
+import sys
+import json
+import pathlib
+import logging
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional, Any, Union, Tuple
+import re
+import dns.resolver
+import requests
+import click
+from ruamel.yaml import YAML
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("dns-manager")
+
+# Set up console for rich output
+console = Console()
+
+# Constants
+API_BASE_URL = "https://dns.hetzner.com/api/v1"
+ZONES_DIR = pathlib.Path("./zones")
+
+# Ensure zones directory exists
+ZONES_DIR.mkdir(exist_ok=True)
+
+# Read API token from environment
+API_TOKEN = os.environ.get("HETZNER_DNS_API_TOKEN")
+
+
+@dataclass
+class Record:
+    """DNS Record data structure with validation."""
+
+    id: str
+    type: str
+    name: str
+    value: str
+
+    def __post_init__(self):
+        """Validate record fields."""
+        if not self.id:
+            raise ValueError("Record ID cannot be empty")
+        if not self.type:
+            raise ValueError("Record type cannot be empty")
+        # No validation for name as it can be empty (represented as "@")
+        if not self.value:
+            raise ValueError("Record value cannot be empty")
+
+
+@dataclass
+class Zone:
+    """DNS Zone data structure with validation."""
+
+    id: str
+    name: str
+    records: List[Record] = field(default_factory=list)
+
+    def __post_init__(self):
+        """Validate zone fields."""
+        if not self.id:
+            raise ValueError("Zone ID cannot be empty")
+        if not self.name:
+            raise ValueError("Zone name cannot be empty")
+
+        # Sort records by type, then name
+        self.records.sort(key=lambda r: (r.type, r.name))
+
+
+class HetznerDNSClient:
+    """Client for interacting with the Hetzner DNS API."""
+
+    def __init__(self, api_token):
+        self.api_token = api_token
+        self.headers = {"Auth-API-Token": api_token, "Content-Type": "application/json"}
+
+    def get_all_zones(self):
+        """Get all zones from the API."""
+        response = requests.get(f"{API_BASE_URL}/zones", headers=self.headers)
+        response.raise_for_status()
+        return response.json()
+
+    def get_zone_records(self, zone_id):
+        """Get all records for a specific zone."""
+        response = requests.get(f"{API_BASE_URL}/records", params={"zone_id": zone_id}, headers=self.headers)
+        response.raise_for_status()
+        return response.json()
+
+    def delete_record(self, record_id):
+        """Delete a specific record."""
+        response = requests.delete(f"{API_BASE_URL}/records/{record_id}", headers=self.headers)
+        response.raise_for_status()
+        return response.json()
+
+    def bulk_update_records(self, records):
+        """Update multiple records at once."""
+        payload = {"records": records}
+        response = requests.put(f"{API_BASE_URL}/records/bulk", headers=self.headers, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
+class YAMLHandler:
+    """Handler for YAML file operations."""
+
+    def __init__(self):
+        self.yaml = YAML()
+        self.yaml.indent(mapping=2, sequence=4, offset=2)
+        self.yaml.preserve_quotes = True
+
+    def read_zone(self, domain):
+        """Read a zone file from disk."""
+        file_path = ZONES_DIR / f"{domain}.yaml"
+
+        if not file_path.exists():
+            return None
+
+        with open(file_path, "r") as f:
+            data = self.yaml.load(f)
+
+        # Create zone object
+        zone = Zone(id=data["id"], name=data["name"], records=[])
+
+        # Add records
+        for record_data in data.get("records", []):
+            record = Record(
+                id=record_data["id"], type=record_data["type"], name=record_data["name"], value=record_data["value"]
+            )
+            zone.records.append(record)
+
+        # Sort records
+        zone.records.sort(key=lambda r: (r.type, r.name))
+
+        return zone
+
+    def write_zone(self, zone):
+        """Write a zone file to disk."""
+        file_path = ZONES_DIR / f"{zone.name}.yaml"
+
+        # Prepare data for serialization
+        data = {
+            "id": zone.id,
+            "name": zone.name,
+            "records": [
+                {"id": record.id, "type": record.type, "name": record.name, "value": record.value}
+                for record in sorted(zone.records, key=lambda r: (r.type, r.name))
+            ],
+        }
+
+        with open(file_path, "w") as f:
+            self.yaml.dump(data, f)
+
+        return file_path
+
+
+def check_dns_record(record, zone_name):
+    """
+    Check if a DNS record matches the actual DNS entry.
+    Returns True if matches, False otherwise.
+    """
+    resolver = dns.resolver.Resolver()
+
+    try:
+        # Handle domain name formatting
+        if record.name == "@":
+            query_name = zone_name
+        else:
+            query_name = f"{record.name}.{zone_name}"
+
+        # Remove trailing dots if present
+        query_name = query_name.rstrip(".")
+
+        # Special handling for different record types
+        if record.type == "MX":
+            # MX records have priority and hostname, e.g., "10 mail.example.com."
+            priority, host = record.value.split(" ", 1)
+            answers = resolver.resolve(query_name, record.type)
+            for rdata in answers:
+                if str(rdata.exchange).rstrip(".") == host.rstrip(".") and rdata.preference == int(priority):
+                    return True
+            return False
+
+        elif record.type == "TXT":
+            # TXT records might have quotes that need to be handled
+            expected_value = record.value.strip('"')
+            answers = resolver.resolve(query_name, record.type)
+            for rdata in answers:
+                txt_value = "".join(str(t) for t in rdata.strings)
+                if txt_value == expected_value:
+                    return True
+            return False
+
+        else:
+            # For other record types (A, AAAA, CNAME, etc.)
+            answers = resolver.resolve(query_name, record.type)
+            for rdata in answers:
+                if record.type == "CNAME":
+                    if str(rdata).rstrip(".") == record.value.rstrip("."):
+                        return True
+                else:
+                    if str(rdata) == record.value:
+                        return True
+            return False
+
+    except dns.resolver.NXDOMAIN:
+        # Domain doesn't exist
+        return False
+    except dns.resolver.NoAnswer:
+        # No answer from DNS
+        return False
+    except dns.resolver.NoNameservers:
+        # No nameservers could be reached
+        return False
+    except Exception as e:
+        # Any other error
+        logger.error(f"Error checking DNS for {record.name}.{zone_name} ({record.type}): {e}")
+        return False
+
+
+@click.group()
+def cli():
+    """
+    Hetzner DNS Manager - A tool to manage DNS records using the Hetzner DNS API.
+
+    This tool allows you to import, check, update, and delete DNS records.
+
+    The API token should be provided via the HETZNER_DNS_API_TOKEN environment variable.
+    """
+    if not API_TOKEN:
+        console.print("[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set.")
+        sys.exit(1)
+
+
+@cli.command("import")
+@click.argument("domain", required=False)
+@click.option("--all", is_flag=True, help="Import all zones")
+def import_zones(domain, all):
+    """
+    Import zones and records from the Hetzner DNS API.
+
+    Specify a domain name to import a single zone, or use --all to import all zones.
+    """
+    yaml_handler = YAMLHandler()
+    client = HetznerDNSClient(API_TOKEN)
+
+    try:
+        # Get all zones
+        zones_data = client.get_all_zones()
+        zones = zones_data.get("zones", [])
+
+        if not zones:
+            console.print("[yellow]No zones found in your Hetzner DNS account.[/]")
+            return
+
+        if all:
+            # Import all zones
+            for zone_data in zones:
+                zone_id = zone_data["id"]
+                zone_name = zone_data["name"]
+
+                console.print(f"Importing zone: [bold]{zone_name}[/]")
+
+                # Get records for this zone
+                records_data = client.get_zone_records(zone_id)
+
+                # Create zone object
+                zone = Zone(id=zone_id, name=zone_name, records=[])
+
+                # Add records to zone
+                for record_data in records_data.get("records", []):
+                    record = Record(
+                        id=record_data["id"],
+                        type=record_data["type"],
+                        name=record_data["name"],
+                        value=record_data["value"],
+                    )
+                    zone.records.append(record)
+
+                # Save zone to file
+                file_path = yaml_handler.write_zone(zone)
+                console.print(f"Saved to: [green]{file_path}[/]")
+
+        elif domain:
+            # Import specific zone
+            zone_data = next((z for z in zones if z["name"] == domain), None)
+
+            if not zone_data:
+                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in your Hetzner DNS account.")
+                return
+
+            zone_id = zone_data["id"]
+            zone_name = zone_data["name"]
+
+            console.print(f"Importing zone: [bold]{zone_name}[/]")
+
+            # Get records for this zone
+            records_data = client.get_zone_records(zone_id)
+
+            # Create zone object
+            zone = Zone(id=zone_id, name=zone_name, records=[])
+
+            # Add records to zone
+            for record_data in records_data.get("records", []):
+                record = Record(
+                    id=record_data["id"],
+                    type=record_data["type"],
+                    name=record_data["name"],
+                    value=record_data["value"],
+                )
+                zone.records.append(record)
+
+            # Save zone to file
+            file_path = yaml_handler.write_zone(zone)
+            console.print(f"Saved to: [green]{file_path}[/]")
+
+        else:
+            console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {str(e)}")
+        sys.exit(1)
+
+
+@cli.command("check")
+@click.argument("domain", required=False)
+@click.option("--all", is_flag=True, help="Check all zones")
+def check_zones(domain, all):
+    """
+    Check DNS records against actual DNS entries.
+
+    Specify a domain name to check a single zone, or use --all to check all zones.
+    """
+    yaml_handler = YAMLHandler()
+
+    try:
+        if all:
+            # Check all zones
+            for file_path in ZONES_DIR.glob("*.yaml"):
+                domain_name = file_path.stem
+                zone = yaml_handler.read_zone(domain_name)
+                if zone:
+                    check_zone_records(zone)
+
+        elif domain:
+            # Check specific zone
+            zone = yaml_handler.read_zone(domain)
+
+            if not zone:
+                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
+                return
+
+            check_zone_records(zone)
+
+        else:
+            console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {str(e)}")
+        sys.exit(1)
+
+
+def check_zone_records(zone):
+    """Check all records in a zone and display results."""
+    console.print(f"\n[bold]Checking zone:[/] {zone.name}")
+
+    table = Table(show_header=True)
+    table.add_column("Type", style="cyan")
+    table.add_column("Name", style="green")
+    table.add_column("Value", style="blue")
+    table.add_column("Status", style="bold")
+
+    all_match = True
+
+    for record in zone.records:
+        # Skip SOA and NS records as they're managed by Hetzner
+        if record.type in ["SOA", "NS"]:
+            continue
+
+        match = check_dns_record(record, zone.name)
+        all_match = all_match and match
+
+        status = "[green]✓ Match[/]" if match else "[red]✗ Mismatch[/]"
+
+        table.add_row(record.type, record.name if record.name else "@", record.value, status)
+
+    console.print(table)
+
+    if all_match:
+        console.print("[green]All records match the DNS entries.[/]")
+    else:
+        console.print("[yellow]Some records do not match the DNS entries.[/]")
+
+    return all_match
+
+
+@cli.command("delete")
+@click.argument("domain", required=True)
+@click.argument("record_name", required=True)
+def delete_record_cmd(domain, record_name):
+    """
+    Delete a DNS record.
+
+    Requires a domain name and a record name.
+    """
+    yaml_handler = YAMLHandler()
+    client = HetznerDNSClient(API_TOKEN)
+
+    try:
+        # Load zone
+        zone = yaml_handler.read_zone(domain)
+
+        if not zone:
+            console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
+            return
+
+        # Find record by name
+        record = next((r for r in zone.records if r.name == record_name), None)
+
+        if not record:
+            # Check if the user meant @ for the root domain
+            if record_name == "@" or not record_name:
+                record = next((r for r in zone.records if r.name == ""), None)
+
+            if not record:
+                console.print(f"[bold red]Error:[/] Record '{record_name}' not found in zone '{domain}'.")
+                return
+
+        # Confirm deletion
+        console.print(f"\nDeleting record: [bold]{record.type}[/] [green]{record.name}[/] [blue]{record.value}[/]")
+
+        # Delete from API
+        client.delete_record(record.id)
+        console.print("[green]Record deleted from Hetzner DNS.[/]")
+
+        # Ask user to update YAML file
+        console.print(
+            f"\n[yellow]Please update the YAML file to remove this record:[/] {ZONES_DIR / f'{domain}.yaml'}"
+        )
+
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {str(e)}")
+        sys.exit(1)
+
+
+@cli.command("update")
+@click.argument("domain", required=False)
+@click.option("--all", is_flag=True, help="Update all zones")
+def update_zones(domain, all):
+    """
+    Check and update DNS records.
+
+    Specify a domain name to update a single zone, or use --all to update all zones.
+    """
+    yaml_handler = YAMLHandler()
+    client = HetznerDNSClient(API_TOKEN)
+
+    try:
+        if all:
+            # Update all zones
+            for file_path in ZONES_DIR.glob("*.yaml"):
+                domain_name = file_path.stem
+                zone = yaml_handler.read_zone(domain_name)
+                if zone:
+                    process_zone_update(zone, yaml_handler, client)
+
+        elif domain:
+            # Update specific zone
+            zone = yaml_handler.read_zone(domain)
+
+            if not zone:
+                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
+                return
+
+            process_zone_update(zone, yaml_handler, client)
+
+        else:
+            console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {str(e)}")
+        sys.exit(1)
+
+
+def process_zone_update(zone, yaml_handler, client):
+    """Process the update for a zone."""
+    console.print(f"\n[bold]Checking zone:[/] {zone.name}")
+
+    # First check records
+    all_match = check_zone_records(zone)
+
+    if all_match:
+        console.print("[green]All records match. No update needed.[/]")
+        return
+
+    # Ask for confirmation
+    if not click.confirm("Do you want to update mismatched records?"):
+        console.print("[yellow]Update cancelled.[/]")
+        return
+
+    # Get current records from API
+    records_data = client.get_zone_records(zone.id)
+    current_records = {r["id"]: r for r in records_data.get("records", [])}
+
+    # Prepare records for bulk update
+    update_records = []
+
+    for record in zone.records:
+        if record.type in ["SOA", "NS"]:
+            continue
+
+        if not check_dns_record(record, zone.name):
+            # Record mismatch, add to update list
+            update_records.append(
+                {"id": record.id, "type": record.type, "name": record.name, "value": record.value, "zone_id": zone.id}
+            )
+
+    if not update_records:
+        console.print("[yellow]No records need to be updated.[/]")
+        return
+
+    # Perform bulk update
+    console.print(f"Updating [bold]{len(update_records)}[/] records...")
+
+    result = client.bulk_update_records(update_records)
+
+    if "failed_records" in result and result["failed_records"]:
+        console.print(f"[bold red]Error:[/] Some records failed to update:")
+        for record in result["failed_records"]:
+            console.print(f"  - {record['type']} {record['name']} {record['value']}")
+    else:
+        console.print("[green]All records updated successfully.[/]")
+
+
+if __name__ == "__main__":
+    cli()
