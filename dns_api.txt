@@ -1,0 +1,276 @@
+Get All Zones
+Returns paginated zones associated with the user. Limited to 100 zones per request.
+QUERY PARAMETERS
+
+name	
+string
+Example: "example.com"
+Full name of a zone. Will return an array with the results or return a 404 status code.
+page	
+number >= 1
+Default: 1
+A page parameter specifies the page to fetch.
+The number of the first page is 1
+per_page	
+number <= 100
+Default: 100
+Number of zones to be shown per page. Returns 100 by default
+search_name	
+string
+Example: "example"
+Partial name of a zone. Will return a maximum of 100 zones that contain the searched string
+HEADER PARAMETERS
+
+Auth-API-Token
+required
+string
+Responses
+
+200 Successful response
+400 Pagination selectors are mutually exclusive
+401 Unauthorized
+406 Not acceptable
+GET
+/zones
+https://dns.hetzner.com/api/v1/zones
+Request samples
+cURLGoPHP (cURL)Python
+Copy
+## Get Zones
+# Returns all zones associated with the user.
+curl "https://dns.hetzner.com/api/v1/zones" \
+     -H 'Auth-API-Token: LlGoDUQ39S6akqoav5meAsv5OIpeywhj'
+Response samples
+200
+application/json
+Copy
+Expand all Collapse all
+{
+"zones": [
+{
+"id": "string",
+"created": "2025-05-07T11:20:45Z",
+"modified": "2025-05-07T11:20:45Z",
+"legacy_dns_host": "string",
+"legacy_ns": [
+"string"
+],
+"name": "string",
+"ns": [
+"string"
+],
+"owner": "string",
+"paused": true,
+"permission": "string",
+"project": "string",
+"registrar": "string",
+"status": "verified",
+"ttl": 0,
+"verified": "2025-05-07T11:20:45Z",
+"records_count": 0,
+"is_secondary_dns": true,
+"txt_verification": {
+"name": "string",
+"token": "string"
+}
+}
+],
+"meta": {
+"pagination": {
+"page": 1,
+"per_page": 1,
+"last_page": 1,
+"total_entries": 0
+}
+}
+}
+
+
+
+
+Get All Records
+Returns all records associated with user.
+QUERY PARAMETERS
+
+page	
+number >= 1
+Default: 1
+A page parameter specifies the page to fetch.
+The number of the first page is 1
+per_page	
+number
+Number of records to be shown per page. Returns all by default
+zone_id	
+string
+ID of zone
+HEADER PARAMETERS
+
+Auth-API-Token
+required
+string
+Responses
+
+200 Successful response
+401 Unauthorized
+406 Not acceptable
+GET
+/records
+https://dns.hetzner.com/api/v1/records
+Request samples
+cURLGoPHP (cURL)Python
+Copy
+## Get Records
+# Returns all records associated with user.
+curl "https://dns.hetzner.com/api/v1/records?zone_id={ZoneID}" \
+     -H 'Auth-API-Token: LlGoDUQ39S6akqoav5meAsv5OIpeywhj'
+Response samples
+200
+application/json
+Copy
+Expand all Collapse all
+{
+"records": [
+{
+"type": "A",
+"id": "string",
+"created": "2025-05-07T11:20:45Z",
+"modified": "2025-05-07T11:20:45Z",
+"zone_id": "string",
+"name": "string",
+"value": "string",
+"ttl": 0
+}
+]
+}
+
+
+
+
+Delete Record
+Deletes a record.
+PATH PARAMETERS
+
+RecordID
+required
+string
+ID of record to delete
+HEADER PARAMETERS
+
+Auth-API-Token
+required
+string
+Responses
+
+200 Successful response
+401 Unauthorized
+403 Forbidden
+404 Not found
+406 Not acceptable
+DELETE
+/records/{RecordID}
+https://dns.hetzner.com/api/v1/records/{RecordID}
+Request samples
+cURLGoPHP (cURL)Python
+Copy
+## Delete Record
+# Deletes a record.
+curl -X "DELETE" "https://dns.hetzner.com/api/v1/records/{RecordID}" \
+     -H 'Auth-API-Token: LlGoDUQ39S6akqoav5meAsv5OIpeywhj'
+
+
+
+
+Bulk Update Records
+Update several records at once.
+HEADER PARAMETERS
+
+Auth-API-Token
+required
+string
+REQUEST BODY SCHEMA: application/json
+
+records	
+Array of objects (RecordBulk)
+Responses
+
+200 Successful response
+401 Unauthorized
+403 Forbidden
+404 Not found
+406 Not acceptable
+409 Conflict
+422 Unprocessable entity
+PUT
+/records/bulk
+https://dns.hetzner.com/api/v1/records/bulk
+Request samples
+Payload cURLGoPHP (cURL)Python
+Copy
+## Bulk Update Records
+# Update several records at once.
+curl -X "PUT" "https://dns.hetzner.com/api/v1/records/bulk" \
+     -H 'Content-Type: application/json' \
+     -H 'Auth-API-Token: LlGoDUQ39S6akqoav5meAsv5OIpeywhj' \
+     -d $'{
+  "records": [
+    {
+      "id": "mnsQmZmXXmWh5MpFeT67ZZ",
+      "value": "2a01:4f8:d0a:11f5::2",
+      "type": "AAAA",
+      "name": "www",
+      "zone_id": "oH7shFebR6nLPgTnmvNjM8"
+    },
+    {
+      "id": "uuK5PKsmfvi7853g5wXfRa",
+      "value": "2a01:4f8:d0a:11f5::2",
+      "ttl": 60,
+      "type": "AAAA",
+      "name": "mail",
+      "zone_id": "6hYQBACMFjqWg6VKPfnvgD"
+    },
+    {
+      "id": "L5RawAt6pJrdhFacynLrVg",
+      "value": "2a01:4f8:d0a:11f5::2",
+      "ttl": 60,
+      "type": "AAAA",
+      "name": "cloud",
+      "zone_id": "6hYQBACMFjqWg6VKPfnvgD"
+    },
+    {
+      "id": "HD3FZLUoxZQ2GpDCxPGEjY",
+      "value": "2a01:4f8:d0a:11f5::2",
+      "ttl": 60,
+      "type": "AAAA",
+      "name": "@",
+      "zone_id": "6hYQBACMFjqWg6VKPfnvgD"
+    }
+  ]
+}'
+Response samples
+200
+application/json
+Copy
+Expand all Collapse all
+{
+"records": [
+{
+"type": "A",
+"id": "string",
+"created": "2025-05-07T11:20:45Z",
+"modified": "2025-05-07T11:20:45Z",
+"zone_id": "string",
+"name": "string",
+"value": "string",
+"ttl": 0
+}
+],
+"failed_records": [
+{
+"zone_id": "string",
+"type": "A",
+"name": "string",
+"value": "string",
+"ttl": 0
+}
+]
+}
