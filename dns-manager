@@ -318,16 +318,26 @@ def cli():
 @cli.command("import")
 @click.argument("domain", required=False)
 @click.option("--all", is_flag=True, help="Import all zones")
-@click.option("--no-txt-concat", is_flag=True, help="Don't concatenate TXT record values")
-def import_zones(domain, all, no_txt_concat):
+@click.option(
+    "--no-txt-concat", is_flag=True, help="Don't concatenate TXT record values"
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Force overwrite existing zone files without confirmation",
+)
+def import_zones(domain, all, no_txt_concat, force):
     """
     Import zones and records from the Hetzner DNS API.
 
     Specify a domain name to import a single zone, or use --all to import all zones.
-    
-    By default, TXT record values with multiple quoted parts (e.g., '"abc" "def"') will be 
-    concatenated into a single quoted value (e.g., '"abcdef"'). Use --no-txt-concat to 
+
+    By default, TXT record values with multiple quoted parts (e.g., '"abc" "def"') will be
+    concatenated into a single quoted value (e.g., '"abcdef"'). Use --no-txt-concat to
     disable this behavior.
+
+    If a zone file already exists, you'll be prompted for confirmation before overwriting.
+    Use --force to skip confirmation and overwrite existing files.
     """
     yaml_handler = YAMLHandler()
     client = HetznerDNSClient(API_TOKEN)
@@ -344,7 +354,9 @@ def import_zones(domain, all, no_txt_concat):
         if all:
             # Import all zones
             for zone_data in zones:
-                import_single_zone(zone_data, client, yaml_handler, no_txt_concat)
+                import_single_zone(
+                    zone_data, client, yaml_handler, no_txt_concat, force
+                )
 
         elif domain:
             # Import specific zone
@@ -356,7 +368,7 @@ def import_zones(domain, all, no_txt_concat):
                 )
                 return
 
-            import_single_zone(zone_data, client, yaml_handler, no_txt_concat)
+            import_single_zone(zone_data, client, yaml_handler, no_txt_concat, force)
 
         else:
             console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
@@ -414,48 +426,65 @@ def process_txt_record_value(value, concat=True):
     """
     if not concat or not value.startswith('"') or '"' not in value[1:]:
         return value
-    
+
     # Extract content from quoted parts and concatenate
     # Match patterns like "abc" "def" "ghi"
     parts = re.findall(r'"([^"]*)"', value)
     if parts:
         return f'"{("").join(parts)}"'
-    
+
     return value
 
 
-def import_single_zone(zone_data, client, yaml_handler, no_txt_concat=False):
+def import_single_zone(
+    zone_data, client, yaml_handler, no_txt_concat=False, force=False
+):
     """
     Import a single zone from Hetzner DNS API.
-    
+
     Args:
         zone_data: Dict containing zone information from API
         client: HetznerDNSClient instance
         yaml_handler: YAMLHandler instance
         no_txt_concat: Flag to disable TXT record concatenation
-        
+        force: Skip confirmation and overwrite existing files
+
     Returns:
-        Path to the saved YAML file
+        Path to the saved YAML file or None if import was canceled
     """
     zone_id = zone_data["id"]
     zone_name = zone_data["name"]
-    
+
     console.print(f"Importing zone: [bold]{zone_name}[/]")
-    
+
+    # Check if zone file already exists
+    file_path = ZONES_DIR / f"{zone_name}.yaml"
+    if file_path.exists() and not force:
+        existing_zone = yaml_handler.read_zone(zone_name)
+        if existing_zone:
+            console.print(f"[yellow]Zone file already exists:[/] {file_path}")
+            console.print(
+                f"Existing file contains [bold]{len(existing_zone.records)}[/] records."
+            )
+
+            if not click.confirm("Do you want to overwrite the existing file?"):
+                console.print("[yellow]Import canceled for this zone.[/]")
+                return None
+
     # Get records for this zone
     records_data = client.get_zone_records(zone_id)
-    
+
     # Create zone object
     zone = Zone(id=zone_id, name=zone_name, records=[])
-    
+
     # Add records to zone
     for record_data in records_data.get("records", []):
         value = record_data["value"]
-        
+
         # Process TXT records
         if record_data["type"] == "TXT":
             value = process_txt_record_value(value, not no_txt_concat)
-        
+
         record = Record(
             id=record_data["id"],
             type=record_data["type"],
@@ -463,11 +492,13 @@ def import_single_zone(zone_data, client, yaml_handler, no_txt_concat=False):
             value=value,
         )
         zone.records.append(record)
-    
+
     # Save zone to file
     file_path = yaml_handler.write_zone(zone)
-    console.print(f"Saved to: [green]{file_path}[/]")
-    
+    console.print(
+        f"Saved to: [green]{file_path}[/] with [bold]{len(zone.records)}[/] records."
+    )
+
     return file_path
 
 
