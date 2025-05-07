@@ -1,6 +1,8 @@
 # Hetzner DNS Manager
 
-A command-line tool to interact with the Hetzner DNS API, allowing you to manage DNS zones and records.
+A command-line tool to interact with the [Hetzner DNS API](https://dns.hetzner.com/api-docs), allowing you to manage DNS records.
+
+Function scope is limited to managing records within existing zones for now.
 
 ## Features
 
@@ -12,12 +14,20 @@ A command-line tool to interact with the Hetzner DNS API, allowing you to manage
 
 ## Installation
 
-The script uses PEP 723 for dependency management, so it's self-contained. You'll need Python 3.12 or higher and typically a working installation of `uv`.
+The script uses PEP 723 for dependency management, so it's self-contained. You'll need Python 3.12 or higher and typically a working installation of [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 # Clone the repository
 git clone https://github.com/serpent213/hetzner-dns-manager.git
 cd hetzner-dns-manager
+```
+
+or
+
+```bash
+# Download raw script
+curl -LO https://github.com/serpent213/hetzner-dns-manager/raw/refs/heads/master/dns-manager
+chmod +x dns-manager
 ```
 
 ## Configuration
@@ -31,6 +41,8 @@ export HETZNER_DNS_API_TOKEN="your_api_token_here"
 You may want to add this to your shell profile file (`.bashrc`, `.zshrc`, etc.) for persistence.
 
 ## Usage
+
+The database will be created in `./zones` and consists of one YAML file per zone.
 
 ### Import Zones and Records
 
