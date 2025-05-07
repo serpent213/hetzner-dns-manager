@@ -653,6 +653,8 @@ def check_zones(ctx, domain, all, verbose):
     Check DNS records against actual DNS entries.
 
     Specify a domain name to check a single zone, or use --all to check all zones.
+
+    Note: Will not catch additional entries that are missing from the local database!
     """
     yaml_handler = YAMLHandler()
     found_issues = False
@@ -848,13 +850,15 @@ def check_zone_records(zone, verbose=False):
 
 @cli.command("delete")
 @click.argument("domain", required=True)
-@click.argument("record_name", required=True)
+@click.argument("record_names", required=True, nargs=-1)
 @click.pass_context
-def delete_record_cmd(ctx, domain, record_name):
+def delete_record_cmd(ctx, domain, record_names):
     """
-    Delete a DNS record.
+    Delete one or more DNS records.
 
-    Requires a domain name and a record name.
+    Requires a domain name and one or more record names.
+
+    Example: dns-manager delete example.com www api docs
     """
     yaml_handler = YAMLHandler()
     client = ctx.obj["client"]
@@ -869,44 +873,122 @@ def delete_record_cmd(ctx, domain, record_name):
             )
             sys.exit(1)
 
-        # Find record by name
-        record = next((r for r in zone.records if r.name == record_name), None)
+        # Process each record name and handle multiple records with the same name
+        records_to_delete = []
+        missing_names = []
 
-        if not record:
-            # Check if the user meant @ for the root domain
-            if record_name == "@" or not record_name:
-                record = next((r for r in zone.records if r.name == ""), None)
+        for record_name in record_names:
+            # Find all records with matching name
+            matching_records = [r for r in zone.records if r.name == record_name]
 
-            if not record:
+            # Display name for output
+            display_name = record_name
+
+            if not matching_records:
+                missing_names.append(record_name)
+                continue
+
+            if len(matching_records) == 1:
+                # Only one record with this name
+                record = matching_records[0]
                 console.print(
-                    f"[bold red]Error:[/] Record '{record_name}' not found in zone '{domain}'."
+                    f"\nFound record: [bold]{record.type}[/] [green]{display_name}[/] [blue]{record.value}[/]"
                 )
-                sys.exit(1)
 
-        # Confirm deletion
-        console.print(
-            f"\nDeleting record: [bold]{record.type}[/] [green]{record.name}[/] [blue]{record.value}[/]"
-        )
+                if click.confirm("Delete this record?", default=False):
+                    records_to_delete.append(record)
+            else:
+                # Multiple records with the same name
+                console.print(
+                    f"\nFound [bold]{len(matching_records)}[/] records with name '{display_name}':"
+                )
 
-        # Delete from API
-        client.delete_record(record.id)
-        console.print("[green]Record deleted from Hetzner DNS.[/]")
+                # Ask for confirmation for each record
+                for record in matching_records:
+                    console.print(
+                        f"  - [bold]{record.type}[/] [green]{display_name}[/] [blue]{record.value}[/]"
+                    )
 
-        # Ask user to update YAML file
-        if click.confirm(
-            "Do you want to update the YAML file to remove this record?", default=True
-        ):
-            # Remove the record from the zone
-            zone.records = [r for r in zone.records if r.id != record.id]
+                    if click.confirm("Delete this record?", default=False):
+                        records_to_delete.append(record)
 
-            # Save the updated zone
-            file_path = yaml_handler.write_zone(zone)
-            console.print(f"[green]Updated YAML file:[/] {file_path}")
-        else:
-            # Display the current message if user declines
+        # If any records weren't found, show warning but continue
+        if missing_names:
             console.print(
-                f"\n[yellow]Please update the YAML file to remove this record:[/] {ZONES_DIR / f'{domain}.yaml'}"
+                f"[bold yellow]Warning:[/] The following record(s) were not found in zone '{domain}':"
             )
+            for name in missing_names:
+                console.print(f"  - {name}")
+
+            # If no records were found at all, exit
+            if not records_to_delete:
+                console.print("[yellow]No records to delete. Exiting.[/]")
+                sys.exit(0)
+
+        # If no records were selected for deletion
+        if not records_to_delete:
+            console.print("[yellow]No records selected for deletion.[/]")
+            sys.exit(0)
+
+        # Display summary of records to be deleted
+        console.print(
+            f"\n[bold]Summary:[/] {len(records_to_delete)} record(s) selected for deletion:"
+        )
+        for record in records_to_delete:
+            display_name = record.name
+            console.print(
+                f"  - [bold]{record.type}[/] [green]{display_name}[/] [blue]{record.value}[/]"
+            )
+
+        # Final confirmation before proceeding with API calls
+        if not click.confirm("Proceed with deletion?", default=False):
+            console.print("[yellow]Deletion canceled.[/]")
+            sys.exit(0)
+
+        # Delete records from API
+        deleted_record_ids = []
+        failed_deletions = []
+
+        for record in records_to_delete:
+            try:
+                client.delete_record(record.id)
+                deleted_record_ids.append(record.id)
+            except Exception as e:
+                failed_deletions.append((record, str(e)))
+
+        # Report results
+        if deleted_record_ids:
+            console.print(
+                f"[green]Successfully deleted {len(deleted_record_ids)} record(s) from Hetzner DNS.[/]"
+            )
+
+        if failed_deletions:
+            console.print(
+                f"[bold red]Failed to delete {len(failed_deletions)} record(s):[/]"
+            )
+            for record, error in failed_deletions:
+                display_name = record.name
+                console.print(f"  - {record.type} {display_name}: {error}")
+
+        # Ask user to update YAML file if any records were deleted
+        if deleted_record_ids:
+            if click.confirm(
+                "Do you want to update the YAML file to remove these records?",
+                default=True,
+            ):
+                # Remove the deleted records from the zone
+                zone.records = [
+                    r for r in zone.records if r.id not in deleted_record_ids
+                ]
+
+                # Save the updated zone
+                file_path = yaml_handler.write_zone(zone)
+                console.print(f"[green]Updated YAML file:[/] {file_path}")
+            elif deleted_record_ids:
+                # Display the current message if user declines
+                console.print(
+                    f"\n[yellow]Please update the YAML file to remove deleted records:[/] {ZONES_DIR / f'{domain}.yaml'}"
+                )
 
     except Exception as e:
         console.print(f"[bold red]Error:[/] {str(e)}")
@@ -958,8 +1040,6 @@ def update_zones(ctx, domain, all):
 
 def process_zone_update(zone, yaml_handler, client):
     """Process the update for a zone."""
-    console.print(f"\n[bold]Checking zone:[/] {zone.name}")
-
     # Check records and get detailed results
     check_result = check_zone_records(zone, verbose=False)
 
