@@ -50,7 +50,7 @@ This will create YAML files in the `./zones` directory.
 
 ### Check DNS Records
 
-Check a specific zone against actual DNS entries:
+Check a specific zone against actual DNS entries using one of the domain's authoritative servers:
 
 ```bash
 ./dns-manager check example.com
@@ -61,6 +61,8 @@ Check all zones:
 ```bash
 ./dns-manager check --all
 ```
+
+SOA records will be ignored as they are updated automatically by Hetzner.
 
 ### Update DNS Records
 

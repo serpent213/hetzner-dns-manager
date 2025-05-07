@@ -373,6 +373,39 @@ def check_dns_record(record, zone_name):
     """
     resolver = dns.resolver.Resolver()
 
+    # First, get the authoritative nameservers for this domain
+    try:
+        ns_answers = dns.resolver.resolve(zone_name, "NS")
+        if ns_answers:
+            # Set the first authoritative nameserver as our resolver
+            auth_ns = str(ns_answers[0]).rstrip(".")
+
+            # Try to get both IPv4 and IPv6 addresses
+            nameserver_ips = []
+
+            # Try IPv4 first
+            try:
+                a_records = dns.resolver.resolve(auth_ns, "A")
+                for a_record in a_records:
+                    nameserver_ips.append(str(a_record))
+            except Exception:
+                pass
+
+            # Try IPv6 if available
+            try:
+                aaaa_records = dns.resolver.resolve(auth_ns, "AAAA")
+                for aaaa_record in aaaa_records:
+                    nameserver_ips.append(str(aaaa_record))
+            except Exception:
+                pass
+
+            # If we got any nameserver IPs, use them
+            if nameserver_ips:
+                resolver.nameservers = nameserver_ips
+    except Exception:
+        # If we can't get authoritative nameservers, continue with default resolver
+        pass
+
     try:
         # Handle domain name formatting
         if record.name == "@":
@@ -716,13 +749,17 @@ def check_zone_records(zone):
     table = Table(show_header=True)
     table.add_column("Type", style="cyan")
     table.add_column("Name", style="green")
-    table.add_column("Value", style="blue")
+    table.add_column("Local Value", style="blue")
     table.add_column("Status", style="bold")
 
     missing_records = []
     mismatch_records = []
 
     for record in zone.records:
+        # Skip SOA records as they're modified by Hetzner upon update
+        if record.type == "SOA":
+            continue
+
         status_code = check_dns_record(record, zone.name)
 
         if status_code == "match":
