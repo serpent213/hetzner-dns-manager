@@ -14,6 +14,7 @@ Hetzner DNS Manager
 
 A command-line tool to interact with the Hetzner DNS API.
 """
+
 import os
 import sys
 import json
@@ -103,20 +104,26 @@ class HetznerDNSClient:
 
     def get_zone_records(self, zone_id):
         """Get all records for a specific zone."""
-        response = requests.get(f"{API_BASE_URL}/records", params={"zone_id": zone_id}, headers=self.headers)
+        response = requests.get(
+            f"{API_BASE_URL}/records", params={"zone_id": zone_id}, headers=self.headers
+        )
         response.raise_for_status()
         return response.json()
 
     def delete_record(self, record_id):
         """Delete a specific record."""
-        response = requests.delete(f"{API_BASE_URL}/records/{record_id}", headers=self.headers)
+        response = requests.delete(
+            f"{API_BASE_URL}/records/{record_id}", headers=self.headers
+        )
         response.raise_for_status()
         return response.json()
 
     def bulk_update_records(self, records):
         """Update multiple records at once."""
         payload = {"records": records}
-        response = requests.put(f"{API_BASE_URL}/records/bulk", headers=self.headers, json=payload)
+        response = requests.put(
+            f"{API_BASE_URL}/records/bulk", headers=self.headers, json=payload
+        )
         response.raise_for_status()
         return response.json()
 
@@ -145,7 +152,10 @@ class YAMLHandler:
         # Add records
         for record_data in data.get("records", []):
             record = Record(
-                id=record_data["id"], type=record_data["type"], name=record_data["name"], value=record_data["value"]
+                id=record_data["id"],
+                type=record_data["type"],
+                name=record_data["name"],
+                value=record_data["value"],
             )
             zone.records.append(record)
 
@@ -163,7 +173,12 @@ class YAMLHandler:
             "id": zone.id,
             "name": zone.name,
             "records": [
-                {"id": record.id, "type": record.type, "name": record.name, "value": record.value}
+                {
+                    "id": record.id,
+                    "type": record.type,
+                    "name": record.name,
+                    "value": record.value,
+                }
                 for record in sorted(zone.records, key=lambda r: (r.type, r.name))
             ],
         }
@@ -197,30 +212,74 @@ def check_dns_record(record, zone_name):
             priority, host = record.value.split(" ", 1)
             answers = resolver.resolve(query_name, record.type)
             for rdata in answers:
-                if str(rdata.exchange).rstrip(".") == host.rstrip(".") and rdata.preference == int(priority):
+                if str(rdata.exchange).rstrip(".") == host.rstrip(
+                    "."
+                ) and rdata.preference == int(priority):
                     return True
             return False
 
         elif record.type == "TXT":
-            # TXT records might have quotes that need to be handled
-            expected_value = record.value.strip('"')
+            # Get the TXT record value from YAML
+            yaml_value = record.value
+
+            # Remove quotes if they are included in the YAML value
+            if yaml_value.startswith('"') and yaml_value.endswith('"'):
+                yaml_value = yaml_value[1:-1]
+
+            # Handle multi-part TXT records with spaces between quoted parts
+            yaml_value = yaml_value.replace('" "', "")
+
+            # Query DNS for actual TXT records
             answers = resolver.resolve(query_name, record.type)
+
+            # Check if any of the returned TXT records match our expected value
             for rdata in answers:
-                txt_value = "".join(str(t) for t in rdata.strings)
-                if txt_value == expected_value:
+                # DNSPython returns TXT records as bytes objects in a list
+                # First join all segments together
+                dns_value = "".join(str(t) for t in rdata.strings)
+
+                # Remove any 'b' prefixes that might appear in string representation of bytes
+                dns_value = dns_value.replace("b'", "").replace("'", "")
+
+                # Compare the DNS value with our expected value
+                if dns_value == yaml_value:
                     return True
+
+            return False
+
+        elif record.type == "CNAME":
+            # Get the CNAME target from YAML
+            target = record.value
+
+            # Query DNS for actual CNAME record
+            answers = resolver.resolve(query_name, record.type)
+
+            # For a CNAME record, if the target in YAML is relative (doesn't end with a dot),
+            # we need to compare with both the FQDN and the relative name
+            for rdata in answers:
+                dns_target = str(rdata).rstrip(".")  # Remove trailing dot if present
+
+                # Check exact match first
+                if dns_target == target:
+                    return True
+
+                # Check if the target in the DNS response is the FQDN version of our relative name
+                expected_fqdn = f"{target}.{zone_name}".rstrip(".")
+                if dns_target == expected_fqdn:
+                    return True
+
+                # Special case for 'localhost' which might be reported as a FQDN
+                if target == "localhost" and dns_target.startswith("localhost."):
+                    return True
+
             return False
 
         else:
-            # For other record types (A, AAAA, CNAME, etc.)
+            # For other record types (A, AAAA, etc.)
             answers = resolver.resolve(query_name, record.type)
             for rdata in answers:
-                if record.type == "CNAME":
-                    if str(rdata).rstrip(".") == record.value.rstrip("."):
-                        return True
-                else:
-                    if str(rdata) == record.value:
-                        return True
+                if str(rdata) == record.value:
+                    return True
             return False
 
     except dns.resolver.NXDOMAIN:
@@ -234,7 +293,9 @@ def check_dns_record(record, zone_name):
         return False
     except Exception as e:
         # Any other error
-        logger.error(f"Error checking DNS for {record.name}.{zone_name} ({record.type}): {e}")
+        logger.error(
+            f"Error checking DNS for {record.name}.{zone_name} ({record.type}): {e}"
+        )
         return False
 
 
@@ -248,7 +309,9 @@ def cli():
     The API token should be provided via the HETZNER_DNS_API_TOKEN environment variable.
     """
     if not API_TOKEN:
-        console.print("[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set.")
+        console.print(
+            "[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set."
+        )
         sys.exit(1)
 
 
@@ -306,7 +369,9 @@ def import_zones(domain, all):
             zone_data = next((z for z in zones if z["name"] == domain), None)
 
             if not zone_data:
-                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in your Hetzner DNS account.")
+                console.print(
+                    f"[bold red]Error:[/] Domain '{domain}' not found in your Hetzner DNS account."
+                )
                 return
 
             zone_id = zone_data["id"]
@@ -367,7 +432,9 @@ def check_zones(domain, all):
             zone = yaml_handler.read_zone(domain)
 
             if not zone:
-                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
+                console.print(
+                    f"[bold red]Error:[/] Domain '{domain}' not found in local database."
+                )
                 return
 
             check_zone_records(zone)
@@ -402,7 +469,9 @@ def check_zone_records(zone):
 
         status = "[green]✓ Match[/]" if match else "[red]✗ Mismatch[/]"
 
-        table.add_row(record.type, record.name if record.name else "@", record.value, status)
+        table.add_row(
+            record.type, record.name if record.name else "@", record.value, status
+        )
 
     console.print(table)
 
@@ -431,7 +500,9 @@ def delete_record_cmd(domain, record_name):
         zone = yaml_handler.read_zone(domain)
 
         if not zone:
-            console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
+            console.print(
+                f"[bold red]Error:[/] Domain '{domain}' not found in local database."
+            )
             return
 
         # Find record by name
@@ -443,11 +514,15 @@ def delete_record_cmd(domain, record_name):
                 record = next((r for r in zone.records if r.name == ""), None)
 
             if not record:
-                console.print(f"[bold red]Error:[/] Record '{record_name}' not found in zone '{domain}'.")
+                console.print(
+                    f"[bold red]Error:[/] Record '{record_name}' not found in zone '{domain}'."
+                )
                 return
 
         # Confirm deletion
-        console.print(f"\nDeleting record: [bold]{record.type}[/] [green]{record.name}[/] [blue]{record.value}[/]")
+        console.print(
+            f"\nDeleting record: [bold]{record.type}[/] [green]{record.name}[/] [blue]{record.value}[/]"
+        )
 
         # Delete from API
         client.delete_record(record.id)
@@ -489,7 +564,9 @@ def update_zones(domain, all):
             zone = yaml_handler.read_zone(domain)
 
             if not zone:
-                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
+                console.print(
+                    f"[bold red]Error:[/] Domain '{domain}' not found in local database."
+                )
                 return
 
             process_zone_update(zone, yaml_handler, client)
@@ -532,7 +609,13 @@ def process_zone_update(zone, yaml_handler, client):
         if not check_dns_record(record, zone.name):
             # Record mismatch, add to update list
             update_records.append(
-                {"id": record.id, "type": record.type, "name": record.name, "value": record.value, "zone_id": zone.id}
+                {
+                    "id": record.id,
+                    "type": record.type,
+                    "name": record.name,
+                    "value": record.value,
+                    "zone_id": zone.id,
+                }
             )
 
     if not update_records:
