@@ -619,8 +619,13 @@ def import_zones(ctx, domain, all, no_txt_concat, force):
 @cli.command("check")
 @click.argument("domain", required=False)
 @click.option("--all", is_flag=True, help="Check all zones")
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Show detailed output for all zones, including those without errors",
+)
 @click.pass_context
-def check_zones(ctx, domain, all):
+def check_zones(ctx, domain, all, verbose):
     """
     Check DNS records against actual DNS entries.
 
@@ -636,7 +641,7 @@ def check_zones(ctx, domain, all):
                 domain_name = file_path.stem
                 zone = yaml_handler.read_zone(domain_name)
                 if zone:
-                    result = check_zone_records(zone)
+                    result = check_zone_records(zone, verbose)
                     if result["missing_records"] or result["mismatch_records"]:
                         found_issues = True
 
@@ -654,7 +659,7 @@ def check_zones(ctx, domain, all):
                 )
                 sys.exit(1)
 
-            result = check_zone_records(zone)
+            result = check_zone_records(zone, verbose)
             if result["missing_records"] or result["mismatch_records"]:
                 sys.exit(1)
 
@@ -753,19 +758,26 @@ def import_single_zone(
     return file_path
 
 
-def check_zone_records(zone):
-    """Check all records in a zone and display results."""
-    console.print(f"\n[bold]Checking zone:[/] {zone.name}")
+def check_zone_records(zone, verbose=False):
+    """
+    Check all records in a zone and display results.
 
+    Args:
+        zone: Zone object to check
+        verbose: If True, show detailed output for all zones, including those without errors
+    """
+    # Track missing and mismatched records
+    missing_records = []
+    mismatch_records = []
+
+    # Create table
     table = Table(show_header=True)
     table.add_column("Type", style="cyan")
     table.add_column("Name", style="green")
     table.add_column("Local Value", style="blue")
     table.add_column("Status", style="bold")
 
-    missing_records = []
-    mismatch_records = []
-
+    # Check each record
     for record in zone.records:
         # Skip SOA records as they're modified by Hetzner upon update
         if record.type == "SOA":
@@ -786,15 +798,23 @@ def check_zone_records(zone):
             record.type, record.name if record.name else "@", record.value, status
         )
 
-    console.print(table)
+    has_issues = bool(missing_records or mismatch_records)
 
-    if not missing_records and not mismatch_records:
-        console.print("[green]All records match the DNS entries.[/]")
-    else:
-        if mismatch_records:
-            console.print("[yellow]Some records do not match the DNS entries.[/]")
-        if missing_records:
-            console.print("[yellow]Some records are missing from DNS.[/]")
+    # Only print output if there are issues or verbose mode is enabled
+    if has_issues or verbose:
+        console.print(f"\n[bold]Checking zone:[/] {zone.name}")
+        console.print(table)
+
+        if not has_issues:
+            console.print("[green]All records match the DNS entries.[/]")
+        else:
+            if mismatch_records:
+                console.print("[yellow]Some records do not match the DNS entries.[/]")
+            if missing_records:
+                console.print("[yellow]Some records are missing from DNS.[/]")
+    elif not verbose and not has_issues:
+        # In non-verbose mode with no issues, just print a simple message
+        console.print(f"[green]Zone {zone.name}: All records match.[/]")
 
     return {"missing_records": missing_records, "mismatch_records": mismatch_records}
 
@@ -914,7 +934,7 @@ def process_zone_update(zone, yaml_handler, client):
     console.print(f"\n[bold]Checking zone:[/] {zone.name}")
 
     # Check records and get detailed results
-    check_result = check_zone_records(zone)
+    check_result = check_zone_records(zone, verbose=False)
 
     # Get missing and mismatched records from the check result
     missing_records = check_result["missing_records"]
