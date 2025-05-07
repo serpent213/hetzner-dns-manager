@@ -426,9 +426,20 @@ def check_dns_record(record, zone_name):
                 priority, host = record.value.split(" ", 1)
 
                 for rdata in answers:
-                    if str(rdata.exchange).rstrip(".") == host.rstrip(
-                        "."
-                    ) and rdata.preference == int(priority):
+                    # Handle both absolute and relative hostnames
+                    rdata_host = str(rdata.exchange).rstrip(".")
+                    yaml_host = host.rstrip(".")
+
+                    # For relative hostnames (without trailing dot), append zone name
+                    if "." not in yaml_host:
+                        expected_fqdn = f"{yaml_host}.{zone_name}".rstrip(".")
+                        if rdata_host == expected_fqdn and rdata.preference == int(
+                            priority
+                        ):
+                            return "match"
+
+                    # Check for exact match (for absolute hostnames)
+                    if rdata_host == yaml_host and rdata.preference == int(priority):
                         return "match"
                 return "mismatch"
 
