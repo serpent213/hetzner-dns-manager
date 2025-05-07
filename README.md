@@ -16,14 +16,8 @@ The script uses PEP 723 for dependency management, so it's self-contained. You'l
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/hetzner-dns-manager.git
+git clone https://github.com/serpent213/hetzner-dns-manager.git
 cd hetzner-dns-manager
-
-# Make the script executable
-chmod +x dns-manager
-
-# Create a symbolic link to make it available system-wide (optional)
-sudo ln -s $(pwd)/dns-manager /usr/local/bin/dns-manager
 ```
 
 ### Dependencies
@@ -125,7 +119,3 @@ records:
     name: '@'
     value: '10 mail.example.com.'
 ```
-
-## License
-
-This project is licensed under the 0-clause BSD License - see the [LICENSE](LICENSE) file for details.
