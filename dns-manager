@@ -17,11 +17,10 @@ A command-line tool to interact with the Hetzner DNS API.
 
 import os
 import sys
-import json
 import pathlib
 import logging
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any, Union, Tuple
+from typing import List
 import re
 import dns.resolver
 import requests
@@ -29,8 +28,6 @@ import click
 from ruamel.yaml import YAML
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
-from rich.text import Text
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -661,7 +658,7 @@ def process_zone_update(zone, yaml_handler, client):
 
     # Get current records from API
     records_data = client.get_zone_records(zone.id)
-    current_records = {r["id"]: r for r in records_data.get("records", [])}
+    {r["id"]: r for r in records_data.get("records", [])}
 
     # Prepare records for bulk update
     update_records = []
@@ -692,7 +689,7 @@ def process_zone_update(zone, yaml_handler, client):
     result = client.bulk_update_records(update_records)
 
     if "failed_records" in result and result["failed_records"]:
-        console.print(f"[bold red]Error:[/] Some records failed to update:")
+        console.print("[bold red]Error:[/] Some records failed to update:")
         for record in result["failed_records"]:
             console.print(f"  - {record['type']} {record['name']} {record['value']}")
     else:
