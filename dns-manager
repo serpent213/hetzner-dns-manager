@@ -20,7 +20,6 @@ Designed and implemented in 2025 by Steffen Beyer (and Claude Code).
 """
 
 import ipaddress
-import logging
 import os
 import pathlib
 import re
@@ -45,10 +44,6 @@ ZONES_DIR.mkdir(exist_ok=True)
 
 # Read API token from environment
 API_TOKEN = os.environ.get("HETZNER_DNS_API_TOKEN")
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-logger = logging.getLogger("dns-manager")
 
 # Set up console for rich output
 console = Console()
@@ -524,16 +519,16 @@ def check_dns_record(record, zone_name):
 
     except dns.resolver.NoNameservers:
         # No nameservers could be reached
-        logger.error(
-            f"Error checking DNS for {record.name}.{zone_name} ({record.type}): No nameservers could be reached"
+        console.print(
+            f"[bold red]Error:[/] checking DNS for {record.name}.{zone_name} ({record.type}): No nameservers could be reached"
         )
-        return "missing"
+        sys.exit(1)
     except Exception as e:
         # Any other error
-        logger.error(
-            f"Error checking DNS for {record.name}.{zone_name} ({record.type}): {e}"
+        console.print(
+            f"[bold red]Error:[/] checking DNS for {record.name}.{zone_name} ({record.type}): {e}"
         )
-        return "missing"
+        sys.exit(1)
 
 
 @click.group(invoke_without_command=True)
