@@ -3,31 +3,36 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #     "click",
-#     "ruamel.yaml",
-#     "rich",
 #     "dnspython",
+#     "ipaddress",
 #     "requests",
+#     "rich",
+#     "ruamel.yaml",
 # ]
 # ///
 """
 Hetzner DNS Manager
 
 A command-line tool to interact with the Hetzner DNS API.
+
+Designed and implemented in 2025 by Steffen Beyer (and Claude Code).
 """
 
-import os
-import sys
-import pathlib
+import ipaddress
 import logging
+import os
+import pathlib
+import re
+import sys
 from dataclasses import dataclass, field
 from typing import List
-import re
+
+import click
 import dns.resolver
 import requests
-import click
-from ruamel.yaml import YAML
 from rich.console import Console
 from rich.table import Table
+from ruamel.yaml import YAML
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -57,14 +62,118 @@ class Record:
     value: str
 
     def __post_init__(self):
-        """Validate record fields."""
-        if not self.id:
-            raise ValueError("Record ID cannot be empty")
+        """Validate record fields strictly based on DNS standards."""
+        # Validate ID - should be a hexadecimal string of specific length or empty for new records
+        if self.id:
+            if not isinstance(self.id, str):
+                raise ValueError("Record ID must be a string")
+
+            # Hetzner record IDs are 32-char hex strings
+            if not re.match(r"^[0-9a-f]{32}$", self.id):
+                raise ValueError(
+                    f"Record ID '{self.id}' must be a 32-character hexadecimal string"
+                )
+
+        # Validate record type
         if not self.type:
             raise ValueError("Record type cannot be empty")
-        # No validation for name as it can be empty (represented as "@")
+
+        valid_record_types = [
+            "A",
+            "AAAA",
+            "CNAME",
+            "MX",
+            "TXT",
+            "NS",
+            "SOA",
+            "SRV",
+            "CAA",
+            "PTR",
+        ]
+        if self.type not in valid_record_types:
+            raise ValueError(
+                f"Invalid record type: {self.type}. Must be one of {', '.join(valid_record_types)}"
+            )
+
+        # Name can be empty (represented as "@") or a valid hostname
+        if not isinstance(self.name, str):
+            raise ValueError("Record name must be a string")
+
+        # Value validation based on record type
         if not self.value:
             raise ValueError("Record value cannot be empty")
+
+        # Type-specific validation
+        if self.type == "A":
+            # IPv4 address validation
+            try:
+                ipaddress.IPv4Address(self.value)
+            except ValueError:
+                raise ValueError(f"Invalid IPv4 address for A record: {self.value}")
+
+        elif self.type == "AAAA":
+            # Strict IPv6 validation using ipaddress module
+            try:
+                ipaddress.IPv6Address(self.value)
+            except ValueError:
+                raise ValueError(f"Invalid IPv6 address for AAAA record: {self.value}")
+
+        elif self.type == "MX":
+            # MX records should have format "priority hostname"
+            if not re.match(r"^\d+\s+\S+$", self.value):
+                raise ValueError(
+                    f"Invalid MX record format: {self.value}. Expected format: '10 mail.example.com.'"
+                )
+
+            # Extract priority and check if it's within valid range (0-65535)
+            try:
+                priority = int(self.value.split()[0])
+                if priority < 0 or priority > 65535:
+                    raise ValueError(
+                        f"Invalid MX priority: {priority}. Must be between 0 and 65535"
+                    )
+            except (ValueError, IndexError):
+                raise ValueError(f"Invalid MX priority in record: {self.value}")
+
+        elif self.type == "TXT":
+            # TXT records should be quoted
+            if not (
+                self.value.startswith('"')
+                and (self.value.endswith('"') or ' "' in self.value)
+            ):
+                raise ValueError(
+                    f"Invalid TXT record format: {self.value}. Value should be quoted"
+                )
+
+        elif self.type == "SOA":
+            # SOA records have a specific format with 7 parts
+            parts = self.value.split(" ")
+            if len(parts) != 7:
+                raise ValueError(
+                    f"Invalid SOA record format: {self.value}. Expected format: 'primary_ns admin_email serial refresh retry expire minimum'"
+                )
+
+            # Check if the serial, refresh, retry, expire, and minimum are numeric
+            for i in range(2, 7):
+                try:
+                    int(parts[i])
+                except ValueError:
+                    raise ValueError(
+                        "Invalid SOA record: numeric values required for serial, refresh, retry, expire, and minimum"
+                    )
+
+        elif self.type == "CNAME":
+            # CNAME records should point to a hostname
+            if not self.value:
+                raise ValueError("CNAME record value cannot be empty")
+
+            # Basic hostname validation
+            if not re.match(
+                r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?\.?$", self.value
+            ):
+                raise ValueError(
+                    f"Invalid hostname format for CNAME record: {self.value}"
+                )
 
 
 @dataclass
@@ -76,11 +185,48 @@ class Zone:
     records: List[Record] = field(default_factory=list)
 
     def __post_init__(self):
-        """Validate zone fields."""
+        """Validate zone fields strictly according to Hetzner DNS standards."""
+        # Validate ID
+        if not isinstance(self.id, str):
+            raise ValueError("Zone ID must be a string")
+
         if not self.id:
             raise ValueError("Zone ID cannot be empty")
+
+        # Hetzner zone IDs are 22-character alphanumeric strings
+        if not re.match(r"^[a-zA-Z0-9]{22}$", self.id):
+            raise ValueError(
+                f"Zone ID '{self.id}' must be a 22-character alphanumeric string"
+            )
+
+        # Validate zone name (domain name)
+        if not isinstance(self.name, str):
+            raise ValueError("Zone name must be a string")
+
         if not self.name:
             raise ValueError("Zone name cannot be empty")
+
+        # Basic domain name validation
+        # Domain names should be RFC 1035 compliant
+        if not re.match(
+            r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$",
+            self.name,
+        ):
+            raise ValueError(f"Invalid domain name format for zone: {self.name}")
+
+        # Validate records list
+        if not isinstance(self.records, list):
+            raise ValueError("Records must be a list")
+
+        # Check for duplicate records (same type, name, and value)
+        record_keys = set()
+        for record in self.records:
+            key = (record.type, record.name, record.value)
+            if key in record_keys:
+                raise ValueError(
+                    f"Duplicate record found: {record.type} {record.name} {record.value}"
+                )
+            record_keys.add(key)
 
         # Sort records by type, then name
         self.records.sort(key=lambda r: (r.type, r.name))
@@ -517,7 +663,9 @@ def import_single_zone(
                 f"Existing file contains [bold]{len(existing_zone.records)}[/] records."
             )
 
-            if not click.confirm("Do you want to overwrite the existing file?", default=False):
+            if not click.confirm(
+                "Do you want to overwrite the existing file?", default=False
+            ):
                 console.print("[yellow]Import canceled for this zone.[/]")
                 return None
 
@@ -566,10 +714,6 @@ def check_zone_records(zone):
     mismatch_records = []
 
     for record in zone.records:
-        # Skip SOA and NS records as they're managed by Hetzner
-        if record.type in ["SOA", "NS"]:
-            continue
-
         status_code = check_dns_record(record, zone.name)
 
         if status_code == "match":
@@ -645,7 +789,9 @@ def delete_record_cmd(ctx, domain, record_name):
         console.print("[green]Record deleted from Hetzner DNS.[/]")
 
         # Ask user to update YAML file
-        if click.confirm("Do you want to update the YAML file to remove this record?", default=True):
+        if click.confirm(
+            "Do you want to update the YAML file to remove this record?", default=True
+        ):
             # Remove the record from the zone
             zone.records = [r for r in zone.records if r.id != record.id]
 
@@ -765,7 +911,8 @@ def process_zone_update(zone, yaml_handler, client):
 
                 # Ask user to update YAML files to include newly created records
                 if click.confirm(
-                    "Do you want to update the YAML file with the new record IDs?", default=True
+                    "Do you want to update the YAML file with the new record IDs?",
+                    default=True,
                 ):
                     # Update record IDs in zone object
                     for new_record in result["records"]:
