@@ -584,9 +584,18 @@ def delete_record_cmd(domain, record_name):
         console.print("[green]Record deleted from Hetzner DNS.[/]")
 
         # Ask user to update YAML file
-        console.print(
-            f"\n[yellow]Please update the YAML file to remove this record:[/] {ZONES_DIR / f'{domain}.yaml'}"
-        )
+        if click.confirm("Do you want to update the YAML file to remove this record?"):
+            # Remove the record from the zone
+            zone.records = [r for r in zone.records if r.id != record.id]
+
+            # Save the updated zone
+            file_path = yaml_handler.write_zone(zone)
+            console.print(f"[green]Updated YAML file:[/] {file_path}")
+        else:
+            # Display the current message if user declines
+            console.print(
+                f"\n[yellow]Please update the YAML file to remove this record:[/] {ZONES_DIR / f'{domain}.yaml'}"
+            )
 
     except Exception as e:
         console.print(f"[bold red]Error:[/] {str(e)}")
