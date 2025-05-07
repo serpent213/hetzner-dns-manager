@@ -24,6 +24,10 @@ Create a nice `README.md` and a 0-clause BSD license in `LICENSE`.
 
 ## CLI Commands
 
+Global option `--dry` to print the first API request that would be performed and then halt.
+
+All commands shall return proper success or error exit codes.
+
 ### import
 
 Accepts a domain name as argument or `--all`.
@@ -42,7 +46,7 @@ Accepts a domain name as argument or `--all`.
 
 Go through all records of the selected zones and perform a DNS request matching the record.
 
-Print a nicely formatted output on the console showing match/mismatch for each record (with some kind of green/red indicator).
+Print a nicely formatted output on the console showing match/mismatch/missing for each record (with some kind of green/red indicator).
 
 ### delete
 
@@ -56,8 +60,6 @@ Ask user to update the YAML file to delete it there as well.
 
 Copies the behaviour of the "check" action, but then:
 
+In case of at least one miss, ask user to create the missing records. If confirmed, perform a bulk create (API Bulk Create Records) and report success or failure including failed records if any. If we have at least one success, ask user to update the relevant YAML files to include the newly created ids.
+
 In case of at least one mismatch, ask user to perform an update. If confirmed, perform a bulk update (API Bulk Update Records) and report success or failure including failed records if any.
-
-### help
-
-Display a helpful usage info.

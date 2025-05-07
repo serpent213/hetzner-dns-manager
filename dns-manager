@@ -89,38 +89,72 @@ class Zone:
 class HetznerDNSClient:
     """Client for interacting with the Hetzner DNS API."""
 
-    def __init__(self, api_token):
+    def __init__(self, api_token, dry_run=False):
         self.api_token = api_token
         self.headers = {"Auth-API-Token": api_token, "Content-Type": "application/json"}
+        self.dry_run = dry_run
+
+    def _dry_run_handler(self, method, url, params=None, json=None):
+        """Handle API request in dry run mode."""
+        console.print("\n[bold]Dry run - API request that would be sent:[/]")
+        console.print(f"{method.upper()} {url}" + (f"?{params}" if params else ""))
+        console.print(
+            "Headers: {'Auth-API-Token': '***', 'Content-Type': 'application/json'}"
+        )
+        if json:
+            console.print(f"Payload: {json}")
+        sys.exit(0)
 
     def get_all_zones(self):
         """Get all zones from the API."""
-        response = requests.get(f"{API_BASE_URL}/zones", headers=self.headers)
+        url = f"{API_BASE_URL}/zones"
+        if self.dry_run:
+            self._dry_run_handler("get", url)
+
+        response = requests.get(url, headers=self.headers)
         response.raise_for_status()
         return response.json()
 
     def get_zone_records(self, zone_id):
         """Get all records for a specific zone."""
-        response = requests.get(
-            f"{API_BASE_URL}/records", params={"zone_id": zone_id}, headers=self.headers
-        )
+        url = f"{API_BASE_URL}/records"
+        params = {"zone_id": zone_id}
+        if self.dry_run:
+            self._dry_run_handler("get", url, f"zone_id={zone_id}")
+
+        response = requests.get(url, params=params, headers=self.headers)
         response.raise_for_status()
         return response.json()
 
     def delete_record(self, record_id):
         """Delete a specific record."""
-        response = requests.delete(
-            f"{API_BASE_URL}/records/{record_id}", headers=self.headers
-        )
+        url = f"{API_BASE_URL}/records/{record_id}"
+        if self.dry_run:
+            self._dry_run_handler("delete", url)
+
+        response = requests.delete(url, headers=self.headers)
         response.raise_for_status()
         return response.json()
 
     def bulk_update_records(self, records):
         """Update multiple records at once."""
+        url = f"{API_BASE_URL}/records/bulk"
         payload = {"records": records}
-        response = requests.put(
-            f"{API_BASE_URL}/records/bulk", headers=self.headers, json=payload
-        )
+        if self.dry_run:
+            self._dry_run_handler("put", url, json=payload)
+
+        response = requests.put(url, headers=self.headers, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def bulk_create_records(self, records):
+        """Create multiple records at once."""
+        url = f"{API_BASE_URL}/records/bulk"
+        payload = {"records": records}
+        if self.dry_run:
+            self._dry_run_handler("post", url, json=payload)
+
+        response = requests.post(url, headers=self.headers, json=payload)
         response.raise_for_status()
         return response.json()
 
@@ -189,7 +223,7 @@ class YAMLHandler:
 def check_dns_record(record, zone_name):
     """
     Check if a DNS record matches the actual DNS entry.
-    Returns True if matches, False otherwise.
+    Returns a string status: 'match', 'mismatch', or 'missing'.
     """
     resolver = dns.resolver.Resolver()
 
@@ -203,113 +237,129 @@ def check_dns_record(record, zone_name):
         # Remove trailing dots if present
         query_name = query_name.rstrip(".")
 
-        # Special handling for different record types
-        if record.type == "MX":
-            # MX records have priority and hostname, e.g., "10 mail.example.com."
-            priority, host = record.value.split(" ", 1)
-            answers = resolver.resolve(query_name, record.type)
-            for rdata in answers:
-                if str(rdata.exchange).rstrip(".") == host.rstrip(
-                    "."
-                ) and rdata.preference == int(priority):
-                    return True
-            return False
-
-        elif record.type == "TXT":
-            # Get the TXT record value from YAML
-            yaml_value = record.value
-
-            # Remove quotes if they are included in the YAML value
-            if yaml_value.startswith('"') and yaml_value.endswith('"'):
-                yaml_value = yaml_value[1:-1]
-
-            # Handle multi-part TXT records with spaces between quoted parts
-            yaml_value = yaml_value.replace('" "', "")
-
-            # Query DNS for actual TXT records
+        # Try to resolve the record to detect if it exists
+        try:
             answers = resolver.resolve(query_name, record.type)
 
-            # Check if any of the returned TXT records match our expected value
-            for rdata in answers:
-                # DNSPython returns TXT records as bytes objects in a list
-                # First join all segments together
-                dns_value = "".join(str(t) for t in rdata.strings)
+            # Special handling for different record types
+            if record.type == "MX":
+                # MX records have priority and hostname, e.g., "10 mail.example.com."
+                priority, host = record.value.split(" ", 1)
 
-                # Remove any 'b' prefixes that might appear in string representation of bytes
-                dns_value = dns_value.replace("b'", "").replace("'", "")
+                for rdata in answers:
+                    if str(rdata.exchange).rstrip(".") == host.rstrip(
+                        "."
+                    ) and rdata.preference == int(priority):
+                        return "match"
+                return "mismatch"
 
-                # Compare the DNS value with our expected value
-                if dns_value == yaml_value:
-                    return True
+            elif record.type == "TXT":
+                # Get the TXT record value from YAML
+                yaml_value = record.value
 
-            return False
+                # Remove quotes if they are included in the YAML value
+                if yaml_value.startswith('"') and yaml_value.endswith('"'):
+                    yaml_value = yaml_value[1:-1]
 
-        elif record.type == "CNAME":
-            # Get the CNAME target from YAML
-            target = record.value
+                # Handle multi-part TXT records with spaces between quoted parts
+                yaml_value = yaml_value.replace('" "', "")
 
-            # Query DNS for actual CNAME record
-            answers = resolver.resolve(query_name, record.type)
+                # Check if any of the returned TXT records match our expected value
+                for rdata in answers:
+                    # DNSPython returns TXT records as bytes objects in a list
+                    # First join all segments together
+                    dns_value = "".join(str(t) for t in rdata.strings)
 
-            # For a CNAME record, if the target in YAML is relative (doesn't end with a dot),
-            # we need to compare with both the FQDN and the relative name
-            for rdata in answers:
-                dns_target = str(rdata).rstrip(".")  # Remove trailing dot if present
+                    # Remove any 'b' prefixes that might appear in string representation of bytes
+                    dns_value = dns_value.replace("b'", "").replace("'", "")
 
-                # Check exact match first
-                if dns_target == target:
-                    return True
+                    # Compare the DNS value with our expected value
+                    if dns_value == yaml_value:
+                        return "match"
 
-                # Check if the target in the DNS response is the FQDN version of our relative name
-                expected_fqdn = f"{target}.{zone_name}".rstrip(".")
-                if dns_target == expected_fqdn:
-                    return True
+                return "mismatch"
 
-                # Special case for 'localhost' which might be reported as a FQDN
-                if target == "localhost" and dns_target.startswith("localhost."):
-                    return True
+            elif record.type == "CNAME":
+                # Get the CNAME target from YAML
+                target = record.value
 
-            return False
+                # For a CNAME record, if the target in YAML is relative (doesn't end with a dot),
+                # we need to compare with both the FQDN and the relative name
+                for rdata in answers:
+                    dns_target = str(rdata).rstrip(
+                        "."
+                    )  # Remove trailing dot if present
 
-        else:
-            # For other record types (A, AAAA, etc.)
-            answers = resolver.resolve(query_name, record.type)
-            for rdata in answers:
-                if str(rdata) == record.value:
-                    return True
-            return False
+                    # Check exact match first
+                    if dns_target == target:
+                        return "match"
 
-    except dns.resolver.NXDOMAIN:
-        # Domain doesn't exist
-        return False
-    except dns.resolver.NoAnswer:
-        # No answer from DNS
-        return False
+                    # Check if the target in the DNS response is the FQDN version of our relative name
+                    expected_fqdn = f"{target}.{zone_name}".rstrip(".")
+                    if dns_target == expected_fqdn:
+                        return "match"
+
+                    # Special case for 'localhost' which might be reported as a FQDN
+                    if target == "localhost" and dns_target.startswith("localhost."):
+                        return "match"
+
+                return "mismatch"
+
+            else:
+                # For other record types (A, AAAA, etc.)
+                for rdata in answers:
+                    if str(rdata) == record.value:
+                        return "match"
+                return "mismatch"
+
+        except dns.resolver.NXDOMAIN:
+            # Domain doesn't exist
+            return "missing"
+        except dns.resolver.NoAnswer:
+            # No answer from DNS for this record type
+            return "missing"
+
     except dns.resolver.NoNameservers:
         # No nameservers could be reached
-        return False
+        logger.error(
+            f"Error checking DNS for {record.name}.{zone_name} ({record.type}): No nameservers could be reached"
+        )
+        return "missing"
     except Exception as e:
         # Any other error
         logger.error(
             f"Error checking DNS for {record.name}.{zone_name} ({record.type}): {e}"
         )
-        return False
+        return "missing"
 
 
 @click.group()
-def cli():
+@click.option(
+    "--dry",
+    is_flag=True,
+    help="Print the first API request that would be performed and then halt",
+)
+@click.pass_context
+def cli(ctx, dry):
     """
     Hetzner DNS Manager - A tool to manage DNS records using the Hetzner DNS API.
 
     This tool allows you to import, check, update, and delete DNS records.
 
-    The API token should be provided via the HETZNER_DNS_API_TOKEN environment variable.
+    The API token has to be provided via the HETZNER_DNS_API_TOKEN environment variable.
     """
     if not API_TOKEN:
         console.print(
             "[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set."
         )
         sys.exit(1)
+
+    # Initialize context object
+    ctx.ensure_object(dict)
+
+    # Create API client and store in context
+    client = HetznerDNSClient(API_TOKEN, dry_run=dry)
+    ctx.obj["client"] = client
 
 
 @cli.command("import")
@@ -323,7 +373,8 @@ def cli():
     is_flag=True,
     help="Force overwrite existing zone files without confirmation",
 )
-def import_zones(domain, all, no_txt_concat, force):
+@click.pass_context
+def import_zones(ctx, domain, all, no_txt_concat, force):
     """
     Import zones and records from the Hetzner DNS API.
 
@@ -337,7 +388,7 @@ def import_zones(domain, all, no_txt_concat, force):
     Use --force to skip confirmation and overwrite existing files.
     """
     yaml_handler = YAMLHandler()
-    client = HetznerDNSClient(API_TOKEN)
+    client = ctx.obj["client"]
 
     try:
         # Get all zones
@@ -378,7 +429,8 @@ def import_zones(domain, all, no_txt_concat, force):
 @cli.command("check")
 @click.argument("domain", required=False)
 @click.option("--all", is_flag=True, help="Check all zones")
-def check_zones(domain, all):
+@click.pass_context
+def check_zones(ctx, domain, all):
     """
     Check DNS records against actual DNS entries.
 
@@ -403,12 +455,13 @@ def check_zones(domain, all):
                 console.print(
                     f"[bold red]Error:[/] Domain '{domain}' not found in local database."
                 )
-                return
+                sys.exit(1)
 
             check_zone_records(zone)
 
         else:
             console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
+            sys.exit(1)
 
     except Exception as e:
         console.print(f"[bold red]Error:[/] {str(e)}")
@@ -464,7 +517,7 @@ def import_single_zone(
                 f"Existing file contains [bold]{len(existing_zone.records)}[/] records."
             )
 
-            if not click.confirm("Do you want to overwrite the existing file?"):
+            if not click.confirm("Do you want to overwrite the existing file?", default=False):
                 console.print("[yellow]Import canceled for this zone.[/]")
                 return None
 
@@ -509,17 +562,24 @@ def check_zone_records(zone):
     table.add_column("Value", style="blue")
     table.add_column("Status", style="bold")
 
-    all_match = True
+    missing_records = []
+    mismatch_records = []
 
     for record in zone.records:
         # Skip SOA and NS records as they're managed by Hetzner
         if record.type in ["SOA", "NS"]:
             continue
 
-        match = check_dns_record(record, zone.name)
-        all_match = all_match and match
+        status_code = check_dns_record(record, zone.name)
 
-        status = "[green]✓ Match[/]" if match else "[red]✗ Mismatch[/]"
+        if status_code == "match":
+            status = "[green]✓ Match[/]"
+        elif status_code == "mismatch":
+            status = "[red]✗ Mismatch[/]"
+            mismatch_records.append(record)
+        elif status_code == "missing":
+            status = "[red]✗ Missing[/]"
+            missing_records.append(record)
 
         table.add_row(
             record.type, record.name if record.name else "@", record.value, status
@@ -527,25 +587,29 @@ def check_zone_records(zone):
 
     console.print(table)
 
-    if all_match:
+    if not missing_records and not mismatch_records:
         console.print("[green]All records match the DNS entries.[/]")
     else:
-        console.print("[yellow]Some records do not match the DNS entries.[/]")
+        if mismatch_records:
+            console.print("[yellow]Some records do not match the DNS entries.[/]")
+        if missing_records:
+            console.print("[yellow]Some records are missing from DNS.[/]")
 
-    return all_match
+    return {"missing_records": missing_records, "mismatch_records": mismatch_records}
 
 
 @cli.command("delete")
 @click.argument("domain", required=True)
 @click.argument("record_name", required=True)
-def delete_record_cmd(domain, record_name):
+@click.pass_context
+def delete_record_cmd(ctx, domain, record_name):
     """
     Delete a DNS record.
 
     Requires a domain name and a record name.
     """
     yaml_handler = YAMLHandler()
-    client = HetznerDNSClient(API_TOKEN)
+    client = ctx.obj["client"]
 
     try:
         # Load zone
@@ -555,7 +619,7 @@ def delete_record_cmd(domain, record_name):
             console.print(
                 f"[bold red]Error:[/] Domain '{domain}' not found in local database."
             )
-            return
+            sys.exit(1)
 
         # Find record by name
         record = next((r for r in zone.records if r.name == record_name), None)
@@ -569,7 +633,7 @@ def delete_record_cmd(domain, record_name):
                 console.print(
                     f"[bold red]Error:[/] Record '{record_name}' not found in zone '{domain}'."
                 )
-                return
+                sys.exit(1)
 
         # Confirm deletion
         console.print(
@@ -581,7 +645,7 @@ def delete_record_cmd(domain, record_name):
         console.print("[green]Record deleted from Hetzner DNS.[/]")
 
         # Ask user to update YAML file
-        if click.confirm("Do you want to update the YAML file to remove this record?"):
+        if click.confirm("Do you want to update the YAML file to remove this record?", default=True):
             # Remove the record from the zone
             zone.records = [r for r in zone.records if r.id != record.id]
 
@@ -602,14 +666,15 @@ def delete_record_cmd(domain, record_name):
 @cli.command("update")
 @click.argument("domain", required=False)
 @click.option("--all", is_flag=True, help="Update all zones")
-def update_zones(domain, all):
+@click.pass_context
+def update_zones(ctx, domain, all):
     """
     Check and update DNS records.
 
     Specify a domain name to update a single zone, or use --all to update all zones.
     """
     yaml_handler = YAMLHandler()
-    client = HetznerDNSClient(API_TOKEN)
+    client = ctx.obj["client"]
 
     try:
         if all:
@@ -628,12 +693,13 @@ def update_zones(domain, all):
                 console.print(
                     f"[bold red]Error:[/] Domain '{domain}' not found in local database."
                 )
-                return
+                sys.exit(1)
 
             process_zone_update(zone, yaml_handler, client)
 
         else:
             console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
+            sys.exit(1)
 
     except Exception as e:
         console.print(f"[bold red]Error:[/] {str(e)}")
@@ -644,56 +710,115 @@ def process_zone_update(zone, yaml_handler, client):
     """Process the update for a zone."""
     console.print(f"\n[bold]Checking zone:[/] {zone.name}")
 
-    # First check records
-    all_match = check_zone_records(zone)
+    # Check records and get detailed results
+    check_result = check_zone_records(zone)
 
-    if all_match:
+    # Get missing and mismatched records from the check result
+    missing_records = check_result["missing_records"]
+    mismatch_records = check_result["mismatch_records"]
+
+    # If no missing or mismatched records, nothing to do
+    if not missing_records and not mismatch_records:
         console.print("[green]All records match. No update needed.[/]")
-        return
+        return True
 
-    # Ask for confirmation
-    if not click.confirm("Do you want to update mismatched records?"):
-        console.print("[yellow]Update cancelled.[/]")
-        return
+    # Handle missing records first
+    if missing_records:
+        console.print(f"\nFound [bold]{len(missing_records)}[/] missing records:")
+        for record in missing_records:
+            display_name = record.name if record.name else "@"
+            console.print(f"  - {record.type} {display_name} {record.value}")
 
-    # Get current records from API
-    records_data = client.get_zone_records(zone.id)
-    {r["id"]: r for r in records_data.get("records", [])}
+        # Ask for confirmation to create missing records
+        if click.confirm("Do you want to create the missing records?", default=True):
+            # Prepare records for bulk create
+            create_records = []
+            for record in missing_records:
+                create_records.append(
+                    {
+                        "zone_id": zone.id,
+                        "type": record.type,
+                        "name": record.name,
+                        "value": record.value,
+                    }
+                )
 
-    # Prepare records for bulk update
-    update_records = []
+            # Perform bulk create
+            console.print(f"Creating [bold]{len(create_records)}[/] records...")
 
-    for record in zone.records:
-        if record.type in ["SOA", "NS"]:
-            continue
+            result = client.bulk_create_records(create_records)
 
-        if not check_dns_record(record, zone.name):
-            # Record mismatch, add to update list
-            update_records.append(
-                {
-                    "id": record.id,
-                    "type": record.type,
-                    "name": record.name,
-                    "value": record.value,
-                    "zone_id": zone.id,
-                }
-            )
+            # Handle invalid records
+            if "invalid_records" in result and result["invalid_records"]:
+                console.print("[bold red]Error:[/] Some records failed to create:")
+                for record in result["invalid_records"]:
+                    display_name = record["name"] if record["name"] else "@"
+                    console.print(
+                        f"  - {record['type']} {display_name} {record['value']}"
+                    )
 
-    if not update_records:
-        console.print("[yellow]No records need to be updated.[/]")
-        return
+            # Handle successfully created records
+            if "records" in result and result["records"]:
+                console.print(
+                    f"[green]Successfully created {len(result['records'])} records.[/]"
+                )
 
-    # Perform bulk update
-    console.print(f"Updating [bold]{len(update_records)}[/] records...")
+                # Ask user to update YAML files to include newly created records
+                if click.confirm(
+                    "Do you want to update the YAML file with the new record IDs?", default=True
+                ):
+                    # Update record IDs in zone object
+                    for new_record in result["records"]:
+                        for record in zone.records:
+                            if (
+                                record.type == new_record["type"]
+                                and record.name == new_record["name"]
+                                and record.value == new_record["value"]
+                            ):
+                                record.id = new_record["id"]
 
-    result = client.bulk_update_records(update_records)
+                    # Save the updated zone
+                    file_path = yaml_handler.write_zone(zone)
+                    console.print(f"[green]Updated YAML file:[/] {file_path}")
 
-    if "failed_records" in result and result["failed_records"]:
-        console.print("[bold red]Error:[/] Some records failed to update:")
-        for record in result["failed_records"]:
-            console.print(f"  - {record['type']} {record['name']} {record['value']}")
-    else:
-        console.print("[green]All records updated successfully.[/]")
+    # Handle mismatched records
+    if mismatch_records:
+        console.print(f"\nFound [bold]{len(mismatch_records)}[/] mismatched records:")
+        for record in mismatch_records:
+            display_name = record.name if record.name else "@"
+            console.print(f"  - {record.type} {display_name} {record.value}")
+
+        # Ask for confirmation to update mismatched records
+        if click.confirm("Do you want to update the mismatched records?", default=True):
+            # Prepare records for bulk update
+            update_records = []
+            for record in mismatch_records:
+                update_records.append(
+                    {
+                        "id": record.id,
+                        "type": record.type,
+                        "name": record.name,
+                        "value": record.value,
+                        "zone_id": zone.id,
+                    }
+                )
+
+            # Perform bulk update
+            console.print(f"Updating [bold]{len(update_records)}[/] records...")
+
+            result = client.bulk_update_records(update_records)
+
+            if "failed_records" in result and result["failed_records"]:
+                console.print("[bold red]Error:[/] Some records failed to update:")
+                for record in result["failed_records"]:
+                    display_name = record["name"] if record["name"] else "@"
+                    console.print(
+                        f"  - {record['type']} {display_name} {record['value']}"
+                    )
+            else:
+                console.print("[green]All records updated successfully.[/]")
+
+    return True
 
 
 if __name__ == "__main__":

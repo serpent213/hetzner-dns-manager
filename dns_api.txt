@@ -274,3 +274,81 @@ Expand all Collapse all
 }
 ]
 }
+
+
+
+
+Bulk Create Records
+Create several records at once.
+HEADER PARAMETERS
+
+Auth-API-Token
+required
+string
+REQUEST BODY SCHEMA: application/json
+
+records	
+Array of objects (Record)
+Responses
+
+200 Successful response
+401 Unauthorized
+403 Forbidden
+406 Not acceptable
+422 Unprocessable entity
+POST
+/records/bulk
+https://dns.hetzner.com/api/v1/records/bulk
+Request samples
+Payload cURLGoPHP (cURL)Python
+application/json
+Copy
+Expand all Collapse all
+{
+"records": [
+{
+"zone_id": "string",
+"type": "A",
+"name": "string",
+"value": "string",
+"ttl": 0
+}
+]
+}
+Response samples
+200
+application/json
+Copy
+Expand all Collapse all
+{
+"records": [
+{
+"type": "A",
+"id": "string",
+"created": "2025-05-07T11:20:45Z",
+"modified": "2025-05-07T11:20:45Z",
+"zone_id": "string",
+"name": "string",
+"value": "string",
+"ttl": 0
+}
+],
+"valid_records": [
+{
+"zone_id": "string",
+"type": "A",
+"name": "string",
+"value": "string",
+"ttl": 0
+}
+],
+"invalid_records": [
+{
+"zone_id": "string",
+"type": "A",
+"name": "string",
+"value": "string",
+"ttl": 0
+}
+]
+}
