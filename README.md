@@ -14,7 +14,7 @@ Function scope is limited to managing records within existing zones for now.
 
 ## Installation
 
-The script uses PEP 723 for dependency management, so it's self-contained. You'll need Python 3.12 or higher and typically a working installation of [`uv`](https://docs.astral.sh/uv/).
+The script uses [PEP 723](https://thisdavej.com/share-python-scripts-like-a-pro-uv-and-pep-723-for-easy-deployment/) for dependency management, so it's self-contained. You'll need Python 3.10 or higher and typically a working installation of [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 # Clone the repository

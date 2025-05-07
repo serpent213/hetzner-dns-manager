@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # -*- mode: python -*-
 # /// script
-# requires-python = ">=3.12"
+# requires-python = ">=3.10"
 # dependencies = [
 #     "click",
 #     "dnspython",
@@ -105,77 +105,84 @@ class Record:
         if not self.value:
             raise ValueError("Record value cannot be empty")
 
-        # Type-specific validation
-        if self.type == "A":
-            # IPv4 address validation
-            try:
-                ipaddress.IPv4Address(self.value)
-            except ValueError:
-                raise ValueError(f"Invalid IPv4 address for A record: {self.value}")
-
-        elif self.type == "AAAA":
-            # Strict IPv6 validation using ipaddress module
-            try:
-                ipaddress.IPv6Address(self.value)
-            except ValueError:
-                raise ValueError(f"Invalid IPv6 address for AAAA record: {self.value}")
-
-        elif self.type == "MX":
-            # MX records should have format "priority hostname"
-            if not re.match(r"^\d+\s+\S+$", self.value):
-                raise ValueError(
-                    f"Invalid MX record format: {self.value}. Expected format: '10 mail.example.com.'"
-                )
-
-            # Extract priority and check if it's within valid range (0-65535)
-            try:
-                priority = int(self.value.split()[0])
-                if priority < 0 or priority > 65535:
-                    raise ValueError(
-                        f"Invalid MX priority: {priority}. Must be between 0 and 65535"
-                    )
-            except (ValueError, IndexError):
-                raise ValueError(f"Invalid MX priority in record: {self.value}")
-
-        elif self.type == "TXT":
-            # TXT records should be quoted
-            if not (
-                self.value.startswith('"')
-                and (self.value.endswith('"') or ' "' in self.value)
-            ):
-                raise ValueError(
-                    f"Invalid TXT record format: {self.value}. Value should be quoted"
-                )
-
-        elif self.type == "SOA":
-            # SOA records have a specific format with 7 parts
-            parts = self.value.split(" ")
-            if len(parts) != 7:
-                raise ValueError(
-                    f"Invalid SOA record format: {self.value}. Expected format: 'primary_ns admin_email serial refresh retry expire minimum'"
-                )
-
-            # Check if the serial, refresh, retry, expire, and minimum are numeric
-            for i in range(2, 7):
+        # Type-specific validation using pattern matching
+        match self.type:
+            case "A":
+                # IPv4 address validation
                 try:
-                    int(parts[i])
+                    ipaddress.IPv4Address(self.value)
+                except ValueError:
+                    raise ValueError(f"Invalid IPv4 address for A record: {self.value}")
+
+            case "AAAA":
+                # Strict IPv6 validation using ipaddress module
+                try:
+                    ipaddress.IPv6Address(self.value)
                 except ValueError:
                     raise ValueError(
-                        "Invalid SOA record: numeric values required for serial, refresh, retry, expire, and minimum"
+                        f"Invalid IPv6 address for AAAA record: {self.value}"
                     )
 
-        elif self.type == "CNAME":
-            # CNAME records should point to a hostname
-            if not self.value:
-                raise ValueError("CNAME record value cannot be empty")
+            case "MX":
+                # MX records should have format "priority hostname"
+                if not re.match(r"^\d+\s+\S+$", self.value):
+                    raise ValueError(
+                        f"Invalid MX record format: {self.value}. Expected format: '10 mail.example.com.'"
+                    )
 
-            # Basic hostname validation
-            if not re.match(
-                r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?\.?$", self.value
-            ):
-                raise ValueError(
-                    f"Invalid hostname format for CNAME record: {self.value}"
-                )
+                # Extract priority and check if it's within valid range (0-65535)
+                try:
+                    priority = int(self.value.split()[0])
+                    if priority < 0 or priority > 65535:
+                        raise ValueError(
+                            f"Invalid MX priority: {priority}. Must be between 0 and 65535"
+                        )
+                except (ValueError, IndexError):
+                    raise ValueError(f"Invalid MX priority in record: {self.value}")
+
+            case "TXT":
+                # TXT records should be quoted
+                if not (
+                    self.value.startswith('"')
+                    and (self.value.endswith('"') or ' "' in self.value)
+                ):
+                    raise ValueError(
+                        f"Invalid TXT record format: {self.value}. Value should be quoted"
+                    )
+
+            case "SOA":
+                # SOA records have a specific format with 7 parts
+                parts = self.value.split(" ")
+                if len(parts) != 7:
+                    raise ValueError(
+                        f"Invalid SOA record format: {self.value}. Expected format: 'primary_ns admin_email serial refresh retry expire minimum'"
+                    )
+
+                # Check if the serial, refresh, retry, expire, and minimum are numeric
+                for i in range(2, 7):
+                    try:
+                        int(parts[i])
+                    except ValueError:
+                        raise ValueError(
+                            "Invalid SOA record: numeric values required for serial, refresh, retry, expire, and minimum"
+                        )
+
+            case "CNAME":
+                # CNAME records should point to a hostname
+                if not self.value:
+                    raise ValueError("CNAME record value cannot be empty")
+
+                # Basic hostname validation
+                if not re.match(
+                    r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?\.?$", self.value
+                ):
+                    raise ValueError(
+                        f"Invalid hostname format for CNAME record: {self.value}"
+                    )
+
+            case _:
+                # Other record types have no specific validation beyond the basic checks above
+                pass
 
 
 @dataclass
@@ -253,58 +260,57 @@ class HetznerDNSClient:
             console.print(f"Payload: {json}")
         sys.exit(0)
 
+    def make_request(self, method, url, params=None, json=None):
+        """Make API request with pattern matching for HTTP methods."""
+        if self.dry_run:
+            self._dry_run_handler(method, url, params, json)
+
+        try:
+            match method.lower():
+                case "get":
+                    response = requests.get(url, params=params, headers=self.headers)
+                case "post":
+                    response = requests.post(url, headers=self.headers, json=json)
+                case "put":
+                    response = requests.put(url, headers=self.headers, json=json)
+                case "delete":
+                    response = requests.delete(url, headers=self.headers)
+                case _:
+                    raise ValueError(f"Unsupported HTTP method: {method}")
+
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            console.print(f"[bold red]Error:[/] {str(e)}")
+            sys.exit(1)
+
     def get_all_zones(self):
         """Get all zones from the API."""
         url = f"{API_BASE_URL}/zones"
-        if self.dry_run:
-            self._dry_run_handler("get", url)
-
-        response = requests.get(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
+        return self.make_request("get", url)
 
     def get_zone_records(self, zone_id):
         """Get all records for a specific zone."""
         url = f"{API_BASE_URL}/records"
         params = {"zone_id": zone_id}
-        if self.dry_run:
-            self._dry_run_handler("get", url, f"zone_id={zone_id}")
-
-        response = requests.get(url, params=params, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
+        return self.make_request("get", url, params)
 
     def delete_record(self, record_id):
         """Delete a specific record."""
         url = f"{API_BASE_URL}/records/{record_id}"
-        if self.dry_run:
-            self._dry_run_handler("delete", url)
-
-        response = requests.delete(url, headers=self.headers)
-        response.raise_for_status()
-        return response.json()
+        return self.make_request("delete", url)
 
     def bulk_update_records(self, records):
         """Update multiple records at once."""
         url = f"{API_BASE_URL}/records/bulk"
         payload = {"records": records}
-        if self.dry_run:
-            self._dry_run_handler("put", url, json=payload)
-
-        response = requests.put(url, headers=self.headers, json=payload)
-        response.raise_for_status()
-        return response.json()
+        return self.make_request("put", url, json=payload)
 
     def bulk_create_records(self, records):
         """Create multiple records at once."""
         url = f"{API_BASE_URL}/records/bulk"
         payload = {"records": records}
-        if self.dry_run:
-            self._dry_run_handler("post", url, json=payload)
-
-        response = requests.post(url, headers=self.headers, json=payload)
-        response.raise_for_status()
-        return response.json()
+        return self.make_request("post", url, json=payload)
 
 
 class YAMLHandler:
@@ -422,87 +428,92 @@ def check_dns_record(record, zone_name):
         try:
             answers = resolver.resolve(query_name, record.type)
 
-            # Special handling for different record types
-            if record.type == "MX":
-                # MX records have priority and hostname, e.g., "10 mail.example.com."
-                priority, host = record.value.split(" ", 1)
-
-                for rdata in answers:
-                    # Handle both absolute and relative hostnames
-                    rdata_host = str(rdata.exchange).rstrip(".")
+            # Use pattern matching for different record types
+            match record.type:
+                case "MX":
+                    # MX records have priority and hostname, e.g., "10 mail.example.com."
+                    priority, host = record.value.split(" ", 1)
+                    priority_int = int(priority)
                     yaml_host = host.rstrip(".")
 
-                    # For relative hostnames (without trailing dot), append zone name
-                    if "." not in yaml_host:
-                        expected_fqdn = f"{yaml_host}.{zone_name}".rstrip(".")
-                        if rdata_host == expected_fqdn and rdata.preference == int(
-                            priority
+                    for rdata in answers:
+                        rdata_host = str(rdata.exchange).rstrip(".")
+
+                        # For relative hostnames (without trailing dot), append zone name
+                        if "." not in yaml_host:
+                            expected_fqdn = f"{yaml_host}.{zone_name}".rstrip(".")
+                            if (
+                                rdata_host == expected_fqdn
+                                and rdata.preference == priority_int
+                            ):
+                                return "match"
+
+                        # Check for exact match (for absolute hostnames)
+                        if rdata_host == yaml_host and rdata.preference == priority_int:
+                            return "match"
+
+                    return "mismatch"
+
+                case "TXT":
+                    # Get the TXT record value from YAML
+                    yaml_value = record.value
+
+                    # Remove quotes if they are included in the YAML value
+                    if yaml_value.startswith('"') and yaml_value.endswith('"'):
+                        yaml_value = yaml_value[1:-1]
+
+                    # Handle multi-part TXT records with spaces between quoted parts
+                    yaml_value = yaml_value.replace('" "', "")
+
+                    # Check if any of the returned TXT records match our expected value
+                    for rdata in answers:
+                        # DNSPython returns TXT records as bytes objects in a list
+                        # First join all segments together
+                        dns_value = "".join(str(t) for t in rdata.strings)
+
+                        # Remove any 'b' prefixes that might appear in string representation of bytes
+                        dns_value = dns_value.replace("b'", "").replace("'", "")
+
+                        # Compare the DNS value with our expected value
+                        if dns_value == yaml_value:
+                            return "match"
+
+                    return "mismatch"
+
+                case "CNAME":
+                    # Get the CNAME target from YAML
+                    target = record.value
+
+                    # For a CNAME record, if the target in YAML is relative (doesn't end with a dot),
+                    # we need to compare with both the FQDN and the relative name
+                    for rdata in answers:
+                        dns_target = str(rdata).rstrip(
+                            "."
+                        )  # Remove trailing dot if present
+
+                        # Check exact match first
+                        if dns_target == target:
+                            return "match"
+
+                        # Check if the target in the DNS response is the FQDN version of our relative name
+                        expected_fqdn = f"{target}.{zone_name}".rstrip(".")
+                        if dns_target == expected_fqdn:
+                            return "match"
+
+                        # Special case for 'localhost' which might be reported as a FQDN
+                        if target == "localhost" and dns_target.startswith(
+                            "localhost."
                         ):
                             return "match"
 
-                    # Check for exact match (for absolute hostnames)
-                    if rdata_host == yaml_host and rdata.preference == int(priority):
-                        return "match"
-                return "mismatch"
+                    return "mismatch"
 
-            elif record.type == "TXT":
-                # Get the TXT record value from YAML
-                yaml_value = record.value
-
-                # Remove quotes if they are included in the YAML value
-                if yaml_value.startswith('"') and yaml_value.endswith('"'):
-                    yaml_value = yaml_value[1:-1]
-
-                # Handle multi-part TXT records with spaces between quoted parts
-                yaml_value = yaml_value.replace('" "', "")
-
-                # Check if any of the returned TXT records match our expected value
-                for rdata in answers:
-                    # DNSPython returns TXT records as bytes objects in a list
-                    # First join all segments together
-                    dns_value = "".join(str(t) for t in rdata.strings)
-
-                    # Remove any 'b' prefixes that might appear in string representation of bytes
-                    dns_value = dns_value.replace("b'", "").replace("'", "")
-
-                    # Compare the DNS value with our expected value
-                    if dns_value == yaml_value:
-                        return "match"
-
-                return "mismatch"
-
-            elif record.type == "CNAME":
-                # Get the CNAME target from YAML
-                target = record.value
-
-                # For a CNAME record, if the target in YAML is relative (doesn't end with a dot),
-                # we need to compare with both the FQDN and the relative name
-                for rdata in answers:
-                    dns_target = str(rdata).rstrip(
-                        "."
-                    )  # Remove trailing dot if present
-
-                    # Check exact match first
-                    if dns_target == target:
-                        return "match"
-
-                    # Check if the target in the DNS response is the FQDN version of our relative name
-                    expected_fqdn = f"{target}.{zone_name}".rstrip(".")
-                    if dns_target == expected_fqdn:
-                        return "match"
-
-                    # Special case for 'localhost' which might be reported as a FQDN
-                    if target == "localhost" and dns_target.startswith("localhost."):
-                        return "match"
-
-                return "mismatch"
-
-            else:
-                # For other record types (A, AAAA, etc.)
-                for rdata in answers:
-                    if str(rdata) == record.value:
-                        return "match"
-                return "mismatch"
+                case _:
+                    # For other record types (A, AAAA, etc.)
+                    for rdata in answers:
+                        if str(rdata) == record.value:
+                            return "match"
+                    return "mismatch"
 
         except dns.resolver.NXDOMAIN:
             # Domain doesn't exist
@@ -802,14 +813,18 @@ def check_zone_records(zone, verbose=False):
 
         status_code = check_dns_record(record, zone.name)
 
-        if status_code == "match":
-            status = "[green]✓ Match[/]"
-        elif status_code == "mismatch":
-            status = "[red]✗ Mismatch[/]"
-            mismatch_records.append(record)
-        elif status_code == "missing":
-            status = "[red]✗ Missing[/]"
-            missing_records.append(record)
+        # Use pattern matching for status code
+        match status_code:
+            case "match":
+                status = "[green]✓ Match[/]"
+            case "mismatch":
+                status = "[red]✗ Mismatch[/]"
+                mismatch_records.append(record)
+            case "missing":
+                status = "[red]✗ Missing[/]"
+                missing_records.append(record)
+            case _:
+                status = f"[yellow]? Unknown ({status_code})[/]"
 
         table.add_row(
             record.type, record.name if record.name else "@", record.value, status
