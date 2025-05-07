@@ -6,29 +6,19 @@ A command-line tool to interact with the Hetzner DNS API, allowing you to manage
 
 - Import zones and records from the Hetzner DNS API
 - Check DNS records against actual DNS entries
-- Update mismatched DNS records
+- Create missing and update mismatched DNS records
 - Delete DNS records
-- Stores zone data in YAML files for easy version control
+- Stores zone data in YAML files for easy manual editing
 
 ## Installation
 
-The script uses PEP 723 for dependency management, so it's self-contained. You'll need Python 3.12 or higher.
+The script uses PEP 723 for dependency management, so it's self-contained. You'll need Python 3.12 or higher and typically a working installation of `uv`.
 
 ```bash
 # Clone the repository
 git clone https://github.com/serpent213/hetzner-dns-manager.git
 cd hetzner-dns-manager
 ```
-
-### Dependencies
-
-The script automatically manages its dependencies using PEP 723. It requires:
-
-- click
-- ruamel.yaml
-- rich
-- dnspython
-- requests
 
 ## Configuration
 
@@ -94,14 +84,6 @@ Delete a specific record:
 ./dns-manager delete example.com www
 ```
 
-### Help
-
-Display help information:
-
-```bash
-./dns-manager help
-```
-
 ## Data Structure
 
 The YAML files in the `./zones` directory follow this structure:
@@ -119,3 +101,10 @@ records:
     name: '@'
     value: '10 mail.example.com.'
 ```
+
+## Related Projects
+
+Some other tools dealing with the Hetzner DNS API (that are not dynamic DNS updaters):
+
+- [A simple Hetzner DNS API client for Python and Bash](https://github.com/arcanemachine/hetzner-dns-tools)
+- [Hetzner DNS CLI Tool](https://github.com/lanbugs/hdns_cli/)
