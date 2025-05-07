@@ -583,6 +583,7 @@ def check_zones(ctx, domain, all):
     Specify a domain name to check a single zone, or use --all to check all zones.
     """
     yaml_handler = YAMLHandler()
+    found_issues = False
 
     try:
         if all:
@@ -591,7 +592,13 @@ def check_zones(ctx, domain, all):
                 domain_name = file_path.stem
                 zone = yaml_handler.read_zone(domain_name)
                 if zone:
-                    check_zone_records(zone)
+                    result = check_zone_records(zone)
+                    if result["missing_records"] or result["mismatch_records"]:
+                        found_issues = True
+
+            # Exit with code 1 if any issues were found
+            if found_issues:
+                sys.exit(1)
 
         elif domain:
             # Check specific zone
@@ -603,7 +610,9 @@ def check_zones(ctx, domain, all):
                 )
                 sys.exit(1)
 
-            check_zone_records(zone)
+            result = check_zone_records(zone)
+            if result["missing_records"] or result["mismatch_records"]:
+                sys.exit(1)
 
         else:
             console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
