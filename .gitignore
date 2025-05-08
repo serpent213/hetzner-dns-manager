@@ -1,5 +1,9 @@
 # Dev tools
 /.claude/settings.local.json
 
+# Build artefacts
+*.egg-info/
+__pycache__/
+
 # YAML DB
 /zones/

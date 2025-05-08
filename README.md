@@ -37,10 +37,24 @@ cd hetzner-dns-manager
 or
 
 ```bash
-# Download raw script
+# Download raw script directly
 curl -LO https://github.com/serpent213/hetzner-dns-manager/raw/refs/heads/master/hdem
 chmod +x hdem
 ```
+
+### Install from PyPI
+
+Alternatively install from PyPI:
+
+```bash
+# Install using pip
+pip install hetzner-dns-manager
+
+# Or with pipx for isolated installation
+pipx install hetzner-dns-manager
+```
+
+After installation, you'll have access to the `hdem` command in your terminal.
 
 ## Configuration
 

@@ -601,7 +601,7 @@ def cli(ctx: click.Context, dry: bool, version: bool) -> None:
     Stores one YAML file per zone in the "./zones" directory. Provides commands for importing,
     checking, updating, and deleting DNS records.
 
-    Requires HETZNER_DNS_API_TOKEN environment variable to be set with a valid API token.
+    Requires HETZNER_DNS_API_TOKEN environment variable to be set to a valid API token.
     """
     if version:
         click.echo(f"{VERSION} (hdem)")
