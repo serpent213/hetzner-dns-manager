@@ -604,7 +604,7 @@ def cli(ctx: click.Context, dry: bool, version: bool) -> None:
     Requires HETZNER_DNS_API_TOKEN environment variable to be set with a valid API token.
     """
     if version:
-        click.echo(f"{VERSION} (dns-manager)")
+        click.echo(f"{VERSION} (hdem)")
         sys.exit(0)
 
     if ctx.invoked_subcommand is None:
@@ -912,8 +912,6 @@ def delete_record_cmd(ctx: click.Context, domain: str, record_names: Tuple[str, 
     Delete one or more DNS records.
 
     Requires a domain name and one or more record names.
-
-    Example: dns-manager delete example.com www api docs
     """
     yaml_handler = YAMLHandler()
     client = ctx.obj["client"]

@@ -26,7 +26,7 @@ The same way you can update records and push those.
 
 ## Installation
 
-The script uses [PEP 723](https://thisdavej.com/share-python-scripts-like-a-pro-uv-and-pep-723-for-easy-deployment/) for dependency management, so it's self-contained. You'll need Python 3.10 or higher and typically a working installation of [`uv`](https://docs.astral.sh/uv/).
+The script uses [PEP 723](https://thisdavej.com/share-python-scripts-like-a-pro-uv-and-pep-723-for-easy-deployment/) for dependency management, so it's self-contained. You'll need Python 3.10 or higher and a working installation of [`uv`](https://docs.astral.sh/uv/), installed via your OS's package manager or via `pip`.
 
 ```bash
 # Clone the repository
@@ -38,8 +38,8 @@ or
 
 ```bash
 # Download raw script
-curl -LO https://github.com/serpent213/hetzner-dns-manager/raw/refs/heads/master/dns-manager
-chmod +x dns-manager
+curl -LO https://github.com/serpent213/hetzner-dns-manager/raw/refs/heads/master/hdem
+chmod +x hdem
 ```
 
 ## Configuration
@@ -61,13 +61,13 @@ The database will be created in `./zones` and consists of one YAML file per zone
 Import a specific zone:
 
 ```bash
-./dns-manager import example.com
+./hdem import example.com
 ```
 
 Import all zones:
 
 ```bash
-./dns-manager import --all
+./hdem import --all
 ```
 
 This will create YAML files in the `./zones` directory.
@@ -77,13 +77,13 @@ This will create YAML files in the `./zones` directory.
 Check a specific zone against actual DNS entries using one of the domain's authoritative servers:
 
 ```bash
-./dns-manager check example.com
+./hdem check example.com
 ```
 
 Check all zones:
 
 ```bash
-./dns-manager check --all
+./hdem check --all
 ```
 
 SOA records will be ignored as they are updated automatically by Hetzner.
@@ -93,13 +93,13 @@ SOA records will be ignored as they are updated automatically by Hetzner.
 Check and update mismatched records for a specific zone:
 
 ```bash
-./dns-manager update example.com
+./hdem update example.com
 ```
 
 Check and update mismatched records for all zones:
 
 ```bash
-./dns-manager update --all
+./hdem update --all
 ```
 
 ### Delete a DNS Record
@@ -107,7 +107,7 @@ Check and update mismatched records for all zones:
 Delete a specific record:
 
 ```bash
-./dns-manager delete example.com www
+./hdem delete example.com www
 ```
 
 ## Data Structure
