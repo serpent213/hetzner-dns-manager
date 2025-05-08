@@ -1,0 +1,55 @@
+[project]
+name = "hetzner-dns-manager"
+version = "0.1.0"
+description = "Hetzner DNS Zone Manager"
+authors = [{ name = "Steffen Beyer", email = "steffen@beyer.io" }]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "BSD-2-Clause"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Internet :: Name Service (DNS)",
+    "License :: OSI Approved :: BSD License",
+]
+dependencies = [
+    "click",
+    "dnspython",
+    "ipaddress",
+    "requests",
+    "rich",
+    "ruamel.yaml",
+]
+
+[dependency-groups]
+dev = [
+    "poethepoet",
+    "ruff",
+]
+
+[tool.uv]
+package = false
+
+[lint]
+select = ["E", "F", "I", "N", "W", "B", "PL", "C", "D", "UP", "ANN"]
+# Explicitly select line spacing rules to avoid conflicts
+ignore = ["D203", "D213"]
+
+[tool.ruff]
+line-length = 118
+target-version = "py310"
+
+[tool.poe.tasks]
+format = { cmd = "ruff format hdem", help = "Format code with ruff" }
+formatcheck = { cmd = "ruff format --check hdem", help = "Check code format" }
+lint = { cmd = "ruff check --preview hdem", help = "Run ruff linter" }
+# typecheck = { cmd = "mypy hdem", help = "Run mypy type checker" }
+check = { sequence = [
+    "formatcheck",
+    "lint",
+    # "typecheck",
+], help = "Run all checks" }
+fix = { sequence = [
+    "format",
+    { cmd = "ruff check --preview --fix --unsafe-fixes hdem" }
+], help = "Fix format and lint (unsafe)" }

@@ -67,9 +67,7 @@ class Record:
 
             # Hetzner record IDs are 32-char hex strings
             if not re.match(r"^[0-9a-f]{32}$", self.id):
-                raise ValueError(
-                    f"Record ID '{self.id}' must be a 32-character hexadecimal string"
-                )
+                raise ValueError(f"Record ID '{self.id}' must be a 32-character hexadecimal string")
 
         # Validate record type
         if not self.type:
@@ -88,9 +86,7 @@ class Record:
             "PTR",
         ]
         if self.type not in valid_record_types:
-            raise ValueError(
-                f"Invalid record type: {self.type}. Must be one of {', '.join(valid_record_types)}"
-            )
+            raise ValueError(f"Invalid record type: {self.type}. Must be one of {', '.join(valid_record_types)}")
 
         # Name can be empty (represented as "@") or a valid hostname
         if not isinstance(self.name, str):
@@ -114,9 +110,7 @@ class Record:
                 try:
                     ipaddress.IPv6Address(self.value)
                 except ValueError:
-                    raise ValueError(
-                        f"Invalid IPv6 address for AAAA record: {self.value}"
-                    )
+                    raise ValueError(f"Invalid IPv6 address for AAAA record: {self.value}")
 
             case "MX":
                 # MX records should have format "priority hostname"
@@ -129,21 +123,14 @@ class Record:
                 try:
                     priority = int(self.value.split()[0])
                     if priority < 0 or priority > 65535:
-                        raise ValueError(
-                            f"Invalid MX priority: {priority}. Must be between 0 and 65535"
-                        )
+                        raise ValueError(f"Invalid MX priority: {priority}. Must be between 0 and 65535")
                 except (ValueError, IndexError):
                     raise ValueError(f"Invalid MX priority in record: {self.value}")
 
             case "TXT":
                 # TXT records should be quoted
-                if not (
-                    self.value.startswith('"')
-                    and (self.value.endswith('"') or ' "' in self.value)
-                ):
-                    raise ValueError(
-                        f"Invalid TXT record format: {self.value}. Value should be quoted"
-                    )
+                if not (self.value.startswith('"') and (self.value.endswith('"') or ' "' in self.value)):
+                    raise ValueError(f"Invalid TXT record format: {self.value}. Value should be quoted")
 
             case "SOA":
                 # SOA records have a specific format with 7 parts
@@ -168,12 +155,8 @@ class Record:
                     raise ValueError("CNAME record value cannot be empty")
 
                 # Basic hostname validation
-                if not re.match(
-                    r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?\.?$", self.value
-                ):
-                    raise ValueError(
-                        f"Invalid hostname format for CNAME record: {self.value}"
-                    )
+                if not re.match(r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?\.?$", self.value):
+                    raise ValueError(f"Invalid hostname format for CNAME record: {self.value}")
 
             case _:
                 # Other record types have no specific validation beyond the basic checks above
@@ -199,9 +182,7 @@ class Zone:
 
         # Hetzner zone IDs are 22-character alphanumeric strings
         if not re.match(r"^[a-zA-Z0-9]{22}$", self.id):
-            raise ValueError(
-                f"Zone ID '{self.id}' must be a 22-character alphanumeric string"
-            )
+            raise ValueError(f"Zone ID '{self.id}' must be a 22-character alphanumeric string")
 
         # Validate zone name (domain name)
         if not isinstance(self.name, str):
@@ -227,9 +208,7 @@ class Zone:
         for record in self.records:
             key = (record.type, record.name, record.value)
             if key in record_keys:
-                raise ValueError(
-                    f"Duplicate record found: {record.type} {record.name} {record.value}"
-                )
+                raise ValueError(f"Duplicate record found: {record.type} {record.name} {record.value}")
             record_keys.add(key)
 
         # Sort records by type, then name
@@ -248,9 +227,7 @@ class HetznerDNSClient:
         """Handle API request in dry run mode."""
         console.print("\n[bold]Dry run - API request that would be sent:[/]")
         console.print(f"{method.upper()} {url}" + (f"?{params}" if params else ""))
-        console.print(
-            "Headers: {'Auth-API-Token': '***', 'Content-Type': 'application/json'}"
-        )
+        console.print("Headers: {'Auth-API-Token': '***', 'Content-Type': 'application/json'}")
         if json:
             console.print(f"Payload: {json}")
         sys.exit(0)
@@ -458,10 +435,7 @@ def check_dns_record(record, zone_name):
                         rdata_host = str(rdata.exchange).rstrip(".")
 
                         # Check if the DNS response matches our expected host
-                        if (
-                            rdata_host == expected_host
-                            and rdata.preference == priority_int
-                        ):
+                        if rdata_host == expected_host and rdata.preference == priority_int:
                             return "match"
 
                     return "mismatch"
@@ -497,9 +471,7 @@ def check_dns_record(record, zone_name):
                     expected_target = get_expected_hostname(record.value, zone_name)
 
                     for rdata in answers:
-                        dns_target = str(rdata).rstrip(
-                            "."
-                        )  # Remove trailing dot if present
+                        dns_target = str(rdata).rstrip(".")  # Remove trailing dot if present
 
                         # Check if DNS response matches our expected target
                         if dns_target == expected_target:
@@ -542,9 +514,7 @@ def check_dns_record(record, zone_name):
         sys.exit(1)
     except Exception as e:
         # Any other error
-        console.print(
-            f"[bold red]Error:[/] checking DNS for {record.name}.{zone_name} ({record.type}): {e}"
-        )
+        console.print(f"[bold red]Error:[/] checking DNS for {record.name}.{zone_name} ({record.type}): {e}")
         sys.exit(1)
 
 
@@ -579,9 +549,7 @@ def cli(ctx, dry, version):
         sys.exit(0)
 
     if not API_TOKEN:
-        console.print(
-            "[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set."
-        )
+        console.print("[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set.")
         sys.exit(1)
 
     # Initialize context object
@@ -595,9 +563,7 @@ def cli(ctx, dry, version):
 @cli.command("import")
 @click.argument("domain", required=False)
 @click.option("--all", is_flag=True, help="Import all zones")
-@click.option(
-    "--no-txt-concat", is_flag=True, help="Don't concatenate TXT record values"
-)
+@click.option("--no-txt-concat", is_flag=True, help="Don't concatenate TXT record values")
 @click.option(
     "--force",
     is_flag=True,
@@ -632,18 +598,14 @@ def import_zones(ctx, domain, all, no_txt_concat, force):
         if all:
             # Import all zones
             for zone_data in zones:
-                import_single_zone(
-                    zone_data, client, yaml_handler, no_txt_concat, force
-                )
+                import_single_zone(zone_data, client, yaml_handler, no_txt_concat, force)
 
         elif domain:
             # Import specific zone
             zone_data = next((z for z in zones if z["name"] == domain), None)
 
             if not zone_data:
-                console.print(
-                    f"[bold red]Error:[/] Domain '{domain}' not found in your Hetzner DNS account."
-                )
+                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in your Hetzner DNS account.")
                 return
 
             import_single_zone(zone_data, client, yaml_handler, no_txt_concat, force)
@@ -696,9 +658,7 @@ def check_zones(ctx, domain, all, verbose):
             zone = yaml_handler.read_zone(domain)
 
             if not zone:
-                console.print(
-                    f"[bold red]Error:[/] Domain '{domain}' not found in local database."
-                )
+                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
                 sys.exit(1)
 
             result = check_zone_records(zone, verbose)
@@ -732,9 +692,7 @@ def process_txt_record_value(value, concat=True):
     return value
 
 
-def import_single_zone(
-    zone_data, client, yaml_handler, no_txt_concat=False, force=False
-):
+def import_single_zone(zone_data, client, yaml_handler, no_txt_concat=False, force=False):
     """
     Import a single zone from Hetzner DNS API.
 
@@ -759,13 +717,9 @@ def import_single_zone(
         existing_zone = yaml_handler.read_zone(zone_name)
         if existing_zone:
             console.print(f"[yellow]Zone file already exists:[/] {file_path}")
-            console.print(
-                f"Existing file contains [bold]{len(existing_zone.records)}[/] records."
-            )
+            console.print(f"Existing file contains [bold]{len(existing_zone.records)}[/] records.")
 
-            if not click.confirm(
-                "Do you want to overwrite the existing file?", default=False
-            ):
+            if not click.confirm("Do you want to overwrite the existing file?", default=False):
                 console.print("[yellow]Import canceled for this zone.[/]")
                 return None
 
@@ -793,9 +747,7 @@ def import_single_zone(
 
     # Save zone to file
     file_path = yaml_handler.write_zone(zone)
-    console.print(
-        f"Saved to: [green]{file_path}[/] with [bold]{len(zone.records)}[/] records."
-    )
+    console.print(f"Saved to: [green]{file_path}[/] with [bold]{len(zone.records)}[/] records.")
 
     return file_path
 
@@ -840,9 +792,7 @@ def check_zone_records(zone, verbose=False):
             case _:
                 status = f"[yellow]? Unknown ({status_code})[/]"
 
-        table.add_row(
-            record.type, record.name if record.name else "@", record.value, status
-        )
+        table.add_row(record.type, record.name if record.name else "@", record.value, status)
 
     has_issues = bool(missing_records or mismatch_records)
 
@@ -885,9 +835,7 @@ def delete_record_cmd(ctx, domain, record_names):
         zone = yaml_handler.read_zone(domain)
 
         if not zone:
-            console.print(
-                f"[bold red]Error:[/] Domain '{domain}' not found in local database."
-            )
+            console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
             sys.exit(1)
 
         # Process each record name and handle multiple records with the same name
@@ -916,24 +864,18 @@ def delete_record_cmd(ctx, domain, record_names):
                     records_to_delete.append(record)
             else:
                 # Multiple records with the same name
-                console.print(
-                    f"\nFound [bold]{len(matching_records)}[/] records with name '{display_name}':"
-                )
+                console.print(f"\nFound [bold]{len(matching_records)}[/] records with name '{display_name}':")
 
                 # Ask for confirmation for each record
                 for record in matching_records:
-                    console.print(
-                        f"  - [bold]{record.type}[/] [green]{display_name}[/] [blue]{record.value}[/]"
-                    )
+                    console.print(f"  - [bold]{record.type}[/] [green]{display_name}[/] [blue]{record.value}[/]")
 
                     if click.confirm("Delete this record?", default=False):
                         records_to_delete.append(record)
 
         # If any records weren't found, show warning but continue
         if missing_names:
-            console.print(
-                f"[bold yellow]Warning:[/] The following record(s) were not found in zone '{domain}':"
-            )
+            console.print(f"[bold yellow]Warning:[/] The following record(s) were not found in zone '{domain}':")
             for name in missing_names:
                 console.print(f"  - {name}")
 
@@ -948,14 +890,10 @@ def delete_record_cmd(ctx, domain, record_names):
             sys.exit(0)
 
         # Display summary of records to be deleted
-        console.print(
-            f"\n[bold]Summary:[/] {len(records_to_delete)} record(s) selected for deletion:"
-        )
+        console.print(f"\n[bold]Summary:[/] {len(records_to_delete)} record(s) selected for deletion:")
         for record in records_to_delete:
             display_name = record.name
-            console.print(
-                f"  - [bold]{record.type}[/] [green]{display_name}[/] [blue]{record.value}[/]"
-            )
+            console.print(f"  - [bold]{record.type}[/] [green]{display_name}[/] [blue]{record.value}[/]")
 
         # Final confirmation before proceeding with API calls
         if not click.confirm("Proceed with deletion?", default=False):
@@ -975,14 +913,10 @@ def delete_record_cmd(ctx, domain, record_names):
 
         # Report results
         if deleted_record_ids:
-            console.print(
-                f"[green]Successfully deleted {len(deleted_record_ids)} record(s) from Hetzner DNS.[/]"
-            )
+            console.print(f"[green]Successfully deleted {len(deleted_record_ids)} record(s) from Hetzner DNS.[/]")
 
         if failed_deletions:
-            console.print(
-                f"[bold red]Failed to delete {len(failed_deletions)} record(s):[/]"
-            )
+            console.print(f"[bold red]Failed to delete {len(failed_deletions)} record(s):[/]")
             for record, error in failed_deletions:
                 display_name = record.name
                 console.print(f"  - {record.type} {display_name}: {error}")
@@ -994,9 +928,7 @@ def delete_record_cmd(ctx, domain, record_names):
                 default=True,
             ):
                 # Remove the deleted records from the zone
-                zone.records = [
-                    r for r in zone.records if r.id not in deleted_record_ids
-                ]
+                zone.records = [r for r in zone.records if r.id not in deleted_record_ids]
 
                 # Save the updated zone
                 file_path = yaml_handler.write_zone(zone)
@@ -1039,9 +971,7 @@ def update_zones(ctx, domain, all):
             zone = yaml_handler.read_zone(domain)
 
             if not zone:
-                console.print(
-                    f"[bold red]Error:[/] Domain '{domain}' not found in local database."
-                )
+                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
                 sys.exit(1)
 
             process_zone_update(zone, yaml_handler, client)
@@ -1100,15 +1030,11 @@ def process_zone_update(zone, yaml_handler, client):
                 console.print("[bold red]Error:[/] Some records failed to create:")
                 for record in result["invalid_records"]:
                     display_name = record["name"] if record["name"] else "@"
-                    console.print(
-                        f"  - {record['type']} {display_name} {record['value']}"
-                    )
+                    console.print(f"  - {record['type']} {display_name} {record['value']}")
 
             # Handle successfully created records
             if "records" in result and result["records"]:
-                console.print(
-                    f"[green]Successfully created {len(result['records'])} records.[/]"
-                )
+                console.print(f"[green]Successfully created {len(result['records'])} records.[/]")
 
                 # Ask user to update YAML files to include newly created records
                 if click.confirm(
@@ -1160,9 +1086,7 @@ def process_zone_update(zone, yaml_handler, client):
                 console.print("[bold red]Error:[/] Some records failed to update:")
                 for record in result["failed_records"]:
                     display_name = record["name"] if record["name"] else "@"
-                    console.print(
-                        f"  - {record['type']} {display_name} {record['value']}"
-                    )
+                    console.print(f"  - {record['type']} {display_name} {record['value']}")
             else:
                 console.print("[green]All records updated successfully.[/]")
 
