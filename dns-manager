@@ -369,6 +369,27 @@ class YAMLHandler:
         return file_path
 
 
+def get_expected_hostname(hostname, zone_name):
+    """
+    Get the expected hostname that should be returned by DNS.
+    For absolute hostnames (ending with dot), it's the hostname without the trailing dot.
+    For relative hostnames, it's hostname.zone_name
+
+    Args:
+        hostname: The hostname from the record
+        zone_name: The zone/domain name
+
+    Returns:
+        The expected hostname that should be returned by DNS
+    """
+    # Check if this is an absolute hostname (ends with dot)
+    if hostname.endswith("."):
+        return hostname.rstrip(".")
+    else:
+        # It's a relative hostname, so append the zone name
+        return f"{hostname}.{zone_name}"
+
+
 def check_dns_record(record, zone_name):
     """
     Check if a DNS record matches the actual DNS entry.
@@ -429,22 +450,18 @@ def check_dns_record(record, zone_name):
                     # MX records have priority and hostname, e.g., "10 mail.example.com."
                     priority, host = record.value.split(" ", 1)
                     priority_int = int(priority)
-                    yaml_host = host.rstrip(".")
+
+                    # Get expected hostname based on whether it's absolute or relative
+                    expected_host = get_expected_hostname(host, zone_name)
 
                     for rdata in answers:
                         rdata_host = str(rdata.exchange).rstrip(".")
 
-                        # For relative hostnames (without trailing dot), append zone name
-                        if "." not in yaml_host:
-                            expected_fqdn = f"{yaml_host}.{zone_name}".rstrip(".")
-                            if (
-                                rdata_host == expected_fqdn
-                                and rdata.preference == priority_int
-                            ):
-                                return "match"
-
-                        # Check for exact match (for absolute hostnames)
-                        if rdata_host == yaml_host and rdata.preference == priority_int:
+                        # Check if the DNS response matches our expected host
+                        if (
+                            rdata_host == expected_host
+                            and rdata.preference == priority_int
+                        ):
                             return "match"
 
                     return "mismatch"
@@ -476,29 +493,29 @@ def check_dns_record(record, zone_name):
                     return "mismatch"
 
                 case "CNAME":
-                    # Get the CNAME target from YAML
-                    target = record.value
+                    # Get the expected target hostname
+                    expected_target = get_expected_hostname(record.value, zone_name)
 
-                    # For a CNAME record, if the target in YAML is relative (doesn't end with a dot),
-                    # we need to compare with both the FQDN and the relative name
                     for rdata in answers:
                         dns_target = str(rdata).rstrip(
                             "."
                         )  # Remove trailing dot if present
 
-                        # Check exact match first
-                        if dns_target == target:
+                        # Check if DNS response matches our expected target
+                        if dns_target == expected_target:
                             return "match"
 
-                        # Check if the target in the DNS response is the FQDN version of our relative name
-                        expected_fqdn = f"{target}.{zone_name}".rstrip(".")
-                        if dns_target == expected_fqdn:
-                            return "match"
+                    return "mismatch"
 
-                        # Special case for 'localhost' which might be reported as a FQDN
-                        if target == "localhost" and dns_target.startswith(
-                            "localhost."
-                        ):
+                case "NS":
+                    # Get the expected nameserver hostname
+                    expected_ns = get_expected_hostname(record.value, zone_name)
+
+                    for rdata in answers:
+                        dns_ns = str(rdata).rstrip(".")  # Remove trailing dot
+
+                        # Check if DNS response matches our expected nameserver
+                        if dns_ns == expected_ns:
                             return "match"
 
                     return "mismatch"
