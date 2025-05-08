@@ -35,7 +35,6 @@ from rich.console import Console
 from rich.table import Table
 from ruamel.yaml import YAML
 
-
 # Constants
 VERSION = "0.1.0"
 API_BASE_URL = "https://dns.hetzner.com/api/v1"
@@ -239,8 +238,8 @@ class Zone:
         if not self.id:
             raise ValueError("Zone ID cannot be empty")
 
-        # Hetzner zone IDs are 22-character alphanumeric strings
-        if not re.match(r"^[a-zA-Z0-9]{22}$", self.id):
+        # Hetzner zone IDs are 21- or 22-character alphanumeric strings
+        if not re.match(r"^[a-zA-Z0-9]{21,22}$", self.id):
             raise ValueError(f"Zone ID '{self.id}' must be a 22-character alphanumeric string")
 
         # Validate zone name (domain name)
@@ -881,7 +880,7 @@ def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Reco
             case _:
                 status = f"[yellow]? Unknown ({status_code})[/]"
 
-        table.add_row(record.type, record.name if record.name else "@", record.value, status)
+        table.add_row(record.type, record.name, record.value, status)
 
     has_issues = bool(missing_records or mismatch_records)
 
@@ -1114,8 +1113,7 @@ def process_zone_update(zone: Zone, yaml_handler: YAMLHandler, client: HetznerDN
                 console.print("[bold red]Error:[/] Some records failed to create:")
                 for record_data in result["invalid_records"]:
                     invalid_record = cast(RecordData, record_data)
-                    display_name = invalid_record["name"] if invalid_record["name"] else "@"
-                    console.print(f"  - {invalid_record['type']} {display_name} {invalid_record['value']}")
+                    console.print(f"  - {invalid_record['type']} {invalid_record['name']} {invalid_record['value']}")
 
             # Handle successfully created records
             if "records" in result and result["records"]:
@@ -1169,8 +1167,7 @@ def process_zone_update(zone: Zone, yaml_handler: YAMLHandler, client: HetznerDN
                 console.print("[bold red]Error:[/] Some records failed to update:")
                 for record_data in result["failed_records"]:
                     failed_record = cast(RecordData, record_data)
-                    display_name = failed_record["name"] if failed_record["name"] else "@"
-                    console.print(f"  - {failed_record['type']} {display_name} {failed_record['value']}")
+                    console.print(f"  - {failed_record['type']} {failed_record['name']} {failed_record['value']}")
             else:
                 console.print("[green]All records updated successfully.[/]")
 
