@@ -403,9 +403,6 @@ def check_dns_record(record, zone_name):
         else:
             query_name = f"{record.name}.{zone_name}"
 
-        # Remove trailing dots if present
-        query_name = query_name.rstrip(".")
-
         # Try to resolve the record to detect if it exists
         try:
             answers = resolver.resolve(query_name, record.type)
@@ -751,6 +748,10 @@ def check_zone_records(zone, verbose=False):
             continue
 
         status_code = check_dns_record(record, zone.name)
+
+        # If the record has an id, we assume a rename
+        if status_code == "missing" and record.id:
+            status_code = "mismatch"
 
         match status_code:
             case "match":
