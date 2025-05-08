@@ -42,10 +42,24 @@ build-backend = "hatchling.build"
 path = "build_hook.py"
 
 [tool.hatch.build.targets.sdist]
-only-include = ["hdem.py", "build_hook.py", "README.md", "LICENSE"]
+only-include = [
+    "hdem.py",
+    # wheel is built from sdist, so we need to include the build_hook.py
+    "build_hook.py",
+    "README.md",
+    "docs/demo_edit_add.webp",
+    "docs/demo_update.webp",
+    "LICENSE",
+]
 
 [tool.hatch.build.targets.wheel]
-only-include = ["hdem.py", "README.md", "LICENSE"]
+only-include = [
+    "hdem.py",
+    "README.md",
+    "docs/demo_edit_add.webp",
+    "docs/demo_update.webp",
+    "LICENSE",
+]
 
 [dependency-groups]
 dev = ["mypy", "poethepoet", "ruff", "types-Pygments", "types-requests"]
