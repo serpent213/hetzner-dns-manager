@@ -34,9 +34,10 @@ dev = [
 package = false
 
 [lint]
-select = ["E", "F", "I", "N", "W", "B", "PL", "C", "D", "UP", "ANN"]
+select = ["E", "F", "I", "N", "W", "B", "PL", "C", "D", "UP", "ANN", "Q"]
 # Explicitly select line spacing rules to avoid conflicts
 ignore = ["D203", "D213"]
+flake8-quotes.inline-quotes = "double"
 
 [tool.ruff]
 line-length = 118
