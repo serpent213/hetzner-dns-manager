@@ -87,6 +87,15 @@ class Record:
         if not isinstance(self.name, str):
             raise ValueError("Record name must be a string")
 
+        # Validate record name according to RFC 1035, plus allow underscores for service records (RFC 2181)
+        # Allow @ as shorthand for apex/root of zone
+        if self.name != "@":
+            if not re.match(
+                r"^([a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?\.)*([a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?)$",
+                self.name,
+            ):
+                raise ValueError(f"Invalid record name format: {self.name}")
+
         if not self.value:
             raise ValueError("Record value cannot be empty")
 
