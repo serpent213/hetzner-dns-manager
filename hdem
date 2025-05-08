@@ -14,7 +14,8 @@
 """
 Hetzner DNS Manager
 
-A command-line tool with local database to interact with the Hetzner DNS API.
+A command-line tool for managing Hetzner DNS records with a local YAML database.
+Allows importing, checking, updating, and deleting DNS records.
 
 Designed and implemented in 2025 by Steffen Beyer (and Claude Code).
 """
@@ -38,6 +39,18 @@ from ruamel.yaml import YAML
 VERSION = "0.1.0"
 API_BASE_URL = "https://dns.hetzner.com/api/v1"
 ZONES_DIR = pathlib.Path("./zones")
+
+# DNS validation regex patterns
+# Single DNS label (RFC 1035) - one component of a domain name
+DNS_LABEL_REGEX = r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
+# DNS label with underscore support (RFC 2181) - for service records
+SERVICE_LABEL_REGEX = r"[a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?"
+# Top-level domain pattern - alphabetic with at least 2 chars
+TLD_REGEX = r"[a-zA-Z]{2,}"
+# Public zone name pattern - requires valid TLD at the end (for Hetzner)
+PUBLIC_ZONE_REGEX = f"^({DNS_LABEL_REGEX}\\.)+{TLD_REGEX}$"
+# Domain name with optional trailing dot (FQDN or relative notation)
+FQDN_OR_RELATIVE_REGEX = f"^{DNS_LABEL_REGEX}(\\.{DNS_LABEL_REGEX})*\\.?$"
 
 # Setup
 ZONES_DIR.mkdir(exist_ok=True)
@@ -90,10 +103,8 @@ class Record:
         # Validate record name according to RFC 1035, plus allow underscores for service records (RFC 2181)
         # Allow @ as shorthand for apex/root of zone
         if self.name != "@":
-            if not re.match(
-                r"^([a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?\.)*([a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?)$",
-                self.name,
-            ):
+            record_name_regex = f"^({SERVICE_LABEL_REGEX}\\.)*{SERVICE_LABEL_REGEX}$"
+            if not re.match(record_name_regex, self.name):
                 raise ValueError(f"Invalid record name format: {self.name}")
 
         if not self.value:
@@ -157,8 +168,7 @@ class Record:
                 if not self.value:
                     raise ValueError("CNAME record value cannot be empty")
 
-                # Basic hostname validation
-                if not re.match(r"^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?\.?$", self.value):
+                if not re.match(FQDN_OR_RELATIVE_REGEX, self.value):
                     raise ValueError(f"Invalid hostname format for CNAME record: {self.value}")
 
             case _:
@@ -194,12 +204,8 @@ class Zone:
         if not self.name:
             raise ValueError("Zone name cannot be empty")
 
-        # Basic domain name validation
-        # Domain names should be RFC 1035 compliant
-        if not re.match(
-            r"^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$",
-            self.name,
-        ):
+        # Hetzner DNS only supports public domains with proper TLDs
+        if not re.match(PUBLIC_ZONE_REGEX, self.name):
             raise ValueError(f"Invalid domain name format for zone: {self.name}")
 
         # Validate records list
@@ -347,16 +353,14 @@ class YAMLHandler:
 
 def get_expected_hostname(hostname, zone_name):
     """
-    Get the expected hostname that should be returned by DNS.
-    For absolute hostnames (ending with dot), it's the hostname without the trailing dot.
-    For relative hostnames, it's hostname.zone_name
+    Format hostname for DNS comparisons based on record format.
 
     Args:
-        hostname: The hostname from the record
-        zone_name: The zone/domain name
+        hostname: Record hostname (may be absolute with trailing dot or relative)
+        zone_name: Zone/domain name for constructing FQDN
 
     Returns:
-        The expected hostname that should be returned by DNS
+        Formatted hostname expected in DNS responses (without trailing dot)
     """
     # Check if this is an absolute hostname (ends with dot)
     if hostname.endswith("."):
@@ -368,8 +372,14 @@ def get_expected_hostname(hostname, zone_name):
 
 def check_dns_record(record, zone_name):
     """
-    Check if a DNS record matches the actual DNS entry.
-    Returns a string status: 'match', 'mismatch', or 'missing'.
+    Verify if a DNS record matches its actual DNS entry using authoritative servers.
+
+    Args:
+        record: Record object to check against DNS
+        zone_name: Zone/domain name the record belongs to
+
+    Returns:
+        Status string: 'match', 'mismatch', or 'missing'
     """
     resolver = dns.resolver.Resolver()
 
@@ -485,6 +495,7 @@ def check_dns_record(record, zone_name):
                     for rdata in answers:
                         if str(rdata) == record.value:
                             return "match"
+
                     return "mismatch"
 
         except dns.resolver.NXDOMAIN:
@@ -521,11 +532,12 @@ def check_dns_record(record, zone_name):
 @click.pass_context
 def cli(ctx, dry, version):
     """
-    Hetzner DNS Manager - A tool to manage DNS records via the Hetzner DNS API using a local database.
+    Hetzner DNS Manager - Manage DNS records with Hetzner DNS API and local YAML database.
 
-    The database consists of one YAML file per zone, stored in directory "./zones".
+    Stores one YAML file per zone in the "./zones" directory. Provides commands for importing,
+    checking, updating, and deleting DNS records.
 
-    The API token has to be provided via the HETZNER_DNS_API_TOKEN environment variable.
+    Requires HETZNER_DNS_API_TOKEN environment variable to be set with a valid API token.
     """
     if version:
         click.echo(f"{VERSION} (dns-manager)")
@@ -660,9 +672,14 @@ def check_zones(ctx, domain, all, verbose):
 
 def process_txt_record_value(value, concat=True):
     """
-    Process TXT record value.
-    If concat is True, concatenate multiple quoted parts (e.g., '"abc" "def"' -> '"abcdef"').
-    If concat is False, leave as is.
+    Normalize TXT record values for consistency.
+
+    Args:
+        value: Original TXT record value
+        concat: If True, concatenate segmented values ('"abc" "def"' → '"abcdef"')
+
+    Returns:
+        Processed TXT record value
     """
     if not concat or not value.startswith('"') or '"' not in value[1:]:
         return value
@@ -678,14 +695,14 @@ def process_txt_record_value(value, concat=True):
 
 def import_single_zone(zone_data, client, yaml_handler, no_txt_concat=False, force=False):
     """
-    Import a single zone from Hetzner DNS API.
+    Import a single zone from Hetzner DNS API to local YAML storage.
 
     Args:
-        zone_data: Dict containing zone information from API
-        client: HetznerDNSClient instance
-        yaml_handler: YAMLHandler instance
-        no_txt_concat: Flag to disable TXT record concatenation
-        force: Skip confirmation and overwrite existing files
+        zone_data: Dict with zone metadata from API response
+        client: HetznerDNSClient instance for API communication
+        yaml_handler: YAMLHandler instance for file operations
+        no_txt_concat: If True, preserve segmented TXT record format
+        force: If True, overwrite existing zone files without prompting
 
     Returns:
         Path to the saved YAML file or None if import was canceled
@@ -735,11 +752,14 @@ def import_single_zone(zone_data, client, yaml_handler, no_txt_concat=False, for
 
 def check_zone_records(zone, verbose=False):
     """
-    Check all records in a zone and display results.
+    Verify all zone records against live DNS and display comparison results.
 
     Args:
-        zone: Zone object to check
+        zone: Zone object containing records to check
         verbose: If True, show detailed output for all zones, including those without errors
+
+    Returns:
+        Dict with missing_records and mismatch_records lists
     """
     # Track missing and mismatched records
     missing_records = []
@@ -961,7 +981,17 @@ def update_zones(ctx, domain, all):
 
 
 def process_zone_update(zone, yaml_handler, client):
-    """Process the update for a zone."""
+    """
+    Update zone records in Hetzner DNS API based on local YAML configuration.
+
+    Args:
+        zone: Zone object containing desired record state
+        yaml_handler: YAMLHandler instance for file operations
+        client: HetznerDNSClient instance for API communication
+
+    Returns:
+        True on successful completion
+    """
     check_result = check_zone_records(zone, verbose=False)
     missing_records = check_result["missing_records"]
     mismatch_records = check_result["mismatch_records"]
