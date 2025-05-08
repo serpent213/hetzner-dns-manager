@@ -21,6 +21,6 @@ jobs:
       run: |
         pip install uv
 
-    - name: Run formatting and linting checks
+    - name: Run format, linting and type checks
       run: |
         uv run poe check

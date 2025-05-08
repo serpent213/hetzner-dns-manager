@@ -26,7 +26,7 @@ import pathlib
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, Dict, List, Literal, Optional, Tuple, TypedDict, cast
 
 import click
 import dns.resolver
@@ -35,27 +35,73 @@ from rich.console import Console
 from rich.table import Table
 from ruamel.yaml import YAML
 
+
 # Constants
 VERSION = "0.1.0"
 API_BASE_URL = "https://dns.hetzner.com/api/v1"
 ZONES_DIR = pathlib.Path("./zones")
 
+
+# Define TypedDict classes for API responses
+class ZoneData(TypedDict):
+    id: str
+    name: str
+
+
+class ZoneResponse(TypedDict):
+    zones: List[ZoneData]
+
+
+class RecordData(TypedDict):
+    id: str
+    zone_id: str
+    type: str
+    name: str
+    value: str
+
+
+class RecordCreateRequest(TypedDict):
+    zone_id: str
+    type: str
+    name: str
+    value: str
+
+
+class RecordUpdateRequest(TypedDict):
+    id: str
+    zone_id: str
+    type: str
+    name: str
+    value: str
+
+
+class BulkRecordResponse(TypedDict):
+    records: List[RecordData]
+    invalid_records: Optional[List[RecordData]]
+    failed_records: Optional[List[RecordData]]
+
+
+# Record type literal for type checking
+RecordType = Literal["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "SRV", "CAA", "PTR"]
+
+
 # DNS validation regex patterns
 # Single DNS label (RFC 1035) - one component of a domain name
-DNS_LABEL_REGEX = r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
+DNS_LABEL_REGEX: str = r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
 # DNS label with underscore support (RFC 2181) - for service records
-SERVICE_LABEL_REGEX = r"[a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?"
+SERVICE_LABEL_REGEX: str = r"[a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?"
 # Top-level domain pattern - alphabetic with at least 2 chars
-TLD_REGEX = r"[a-zA-Z]{2,}"
+TLD_REGEX: str = r"[a-zA-Z]{2,}"
 # Public zone name pattern - requires valid TLD at the end (for Hetzner)
-PUBLIC_ZONE_REGEX = f"^({DNS_LABEL_REGEX}\\.)+{TLD_REGEX}$"
+PUBLIC_ZONE_REGEX: str = f"^({DNS_LABEL_REGEX}\\.)+{TLD_REGEX}$"
 # Domain name with optional trailing dot (FQDN or relative notation)
-FQDN_OR_RELATIVE_REGEX = f"^{DNS_LABEL_REGEX}(\\.{DNS_LABEL_REGEX})*\\.?$"
+FQDN_OR_RELATIVE_REGEX: str = f"^{DNS_LABEL_REGEX}(\\.{DNS_LABEL_REGEX})*\\.?$"
 
-# Setup
+
+# Global setup
 ZONES_DIR.mkdir(exist_ok=True)
-API_TOKEN = os.environ.get("HETZNER_DNS_API_TOKEN")
-console = Console()
+API_TOKEN: Optional[str] = os.environ.get("HETZNER_DNS_API_TOKEN")
+console: Console = Console()
 
 
 @dataclass
@@ -63,7 +109,7 @@ class Record:
     """DNS Record data structure with validation."""
 
     id: str
-    type: str
+    type: RecordType
     name: str
     value: str
 
@@ -227,12 +273,21 @@ class Zone:
 class HetznerDNSClient:
     """Client for interacting with the Hetzner DNS API."""
 
-    def __init__(self, api_token, dry_run=False):
-        self.api_token = api_token
-        self.headers = {"Auth-API-Token": api_token, "Content-Type": "application/json"}
-        self.dry_run = dry_run
+    def __init__(self, api_token: str, dry_run: bool = False) -> None:
+        self.api_token: str = api_token
+        self.headers: Dict[str, str] = {
+            "Auth-API-Token": api_token,
+            "Content-Type": "application/json",
+        }
+        self.dry_run: bool = dry_run
 
-    def _dry_run_handler(self, method, url, params=None, json=None):
+    def _dry_run_handler(
+        self,
+        method: str,
+        url: str,
+        params: Optional[Dict[str, str]] = None,
+        json: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Handle API request in dry run mode."""
         console.print("\n[bold]Dry run - API request that would be sent:[/]")
         console.print(f"{method.upper()} {url}" + (f"?{params}" if params else ""))
@@ -241,7 +296,13 @@ class HetznerDNSClient:
             console.print(f"Payload: {json}")
         sys.exit(0)
 
-    def make_request(self, method, url, params=None, json=None):
+    def make_request(
+        self,
+        method: str,
+        url: str,
+        params: Optional[Dict[str, str]] = None,
+        json: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Make API request with pattern matching for HTTP methods."""
         if self.dry_run:
             self._dry_run_handler(method, url, params, json)
@@ -265,44 +326,44 @@ class HetznerDNSClient:
             console.print(f"[bold red]Error:[/] {str(e)}")
             sys.exit(1)
 
-    def get_all_zones(self):
+    def get_all_zones(self) -> ZoneResponse:
         """Get all zones from the API."""
         url = f"{API_BASE_URL}/zones"
-        return self.make_request("get", url)
+        return cast(ZoneResponse, self.make_request("get", url))
 
-    def get_zone_records(self, zone_id):
+    def get_zone_records(self, zone_id: str) -> Dict[str, List[RecordData]]:
         """Get all records for a specific zone."""
         url = f"{API_BASE_URL}/records"
         params = {"zone_id": zone_id}
         return self.make_request("get", url, params)
 
-    def delete_record(self, record_id):
+    def delete_record(self, record_id: str) -> Dict[str, Any]:
         """Delete a specific record."""
         url = f"{API_BASE_URL}/records/{record_id}"
         return self.make_request("delete", url)
 
-    def bulk_update_records(self, records):
+    def bulk_update_records(self, records: List[RecordUpdateRequest]) -> BulkRecordResponse:
         """Update multiple records at once."""
         url = f"{API_BASE_URL}/records/bulk"
         payload = {"records": records}
-        return self.make_request("put", url, json=payload)
+        return cast(BulkRecordResponse, self.make_request("put", url, json=payload))
 
-    def bulk_create_records(self, records):
+    def bulk_create_records(self, records: List[RecordCreateRequest]) -> BulkRecordResponse:
         """Create multiple records at once."""
         url = f"{API_BASE_URL}/records/bulk"
         payload = {"records": records}
-        return self.make_request("post", url, json=payload)
+        return cast(BulkRecordResponse, self.make_request("post", url, json=payload))
 
 
 class YAMLHandler:
     """Handler for YAML file operations."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.yaml = YAML()
         self.yaml.indent(mapping=2, sequence=4, offset=2)
         self.yaml.preserve_quotes = True
 
-    def read_zone(self, domain):
+    def read_zone(self, domain: str) -> Optional[Zone]:
         """Read a zone file from disk."""
         file_path = ZONES_DIR / f"{domain}.yaml"
 
@@ -315,9 +376,11 @@ class YAMLHandler:
         zone = Zone(id=data["id"], name=data["name"], records=[])
 
         for record_data in data.get("records", []):
+            # Cast the record type to RecordType
+            record_type = cast(RecordType, record_data["type"])
             record = Record(
                 id=record_data["id"],
-                type=record_data["type"],
+                type=record_type,
                 name=record_data["name"],
                 value=record_data["value"],
             )
@@ -327,7 +390,7 @@ class YAMLHandler:
 
         return zone
 
-    def write_zone(self, zone):
+    def write_zone(self, zone: Zone) -> pathlib.Path:
         """Write a zone file to disk."""
         file_path = ZONES_DIR / f"{zone.name}.yaml"
 
@@ -351,7 +414,7 @@ class YAMLHandler:
         return file_path
 
 
-def get_expected_hostname(hostname, zone_name):
+def get_expected_hostname(hostname: str, zone_name: str) -> str:
     """
     Format hostname for DNS comparisons based on record format.
 
@@ -370,7 +433,7 @@ def get_expected_hostname(hostname, zone_name):
         return f"{hostname}.{zone_name}"
 
 
-def check_dns_record(record, zone_name):
+def check_dns_record(record: Record, zone_name: str) -> str:
     """
     Verify if a DNS record matches its actual DNS entry using authoritative servers.
 
@@ -436,9 +499,10 @@ def check_dns_record(record, zone_name):
                     expected_host = get_expected_hostname(host, zone_name)
 
                     for rdata in answers:
-                        rdata_host = str(rdata.exchange).rstrip(".")
+                        rdata_host = str(getattr(rdata, "exchange")).rstrip(".")
+                        rdata_pref = getattr(rdata, "preference")
 
-                        if rdata_host == expected_host and rdata.preference == priority_int:
+                        if rdata_host == expected_host and rdata_pref == priority_int:
                             return "match"
 
                     return "mismatch"
@@ -458,7 +522,8 @@ def check_dns_record(record, zone_name):
                     for rdata in answers:
                         # DNSPython returns TXT records as bytes objects in a list
                         # First join all segments together
-                        dns_value = "".join(str(t) for t in rdata.strings)
+                        strings = getattr(rdata, "strings", [])
+                        dns_value = "".join(str(t) for t in strings)
 
                         # Remove any 'b' prefixes that might appear in string representation of bytes
                         dns_value = dns_value.replace("b'", "").replace("'", "")
@@ -530,7 +595,7 @@ def check_dns_record(record, zone_name):
     help="Show the version and exit",
 )
 @click.pass_context
-def cli(ctx, dry, version):
+def cli(ctx: click.Context, dry: bool, version: bool) -> None:
     """
     Hetzner DNS Manager - Manage DNS records with Hetzner DNS API and local YAML database.
 
@@ -568,7 +633,13 @@ def cli(ctx, dry, version):
     help="Force overwrite existing zone files without confirmation",
 )
 @click.pass_context
-def import_zones(ctx, domain, all, no_txt_concat, force):
+def import_zones(
+    ctx: click.Context,
+    domain: Optional[str],
+    all: bool,
+    no_txt_concat: bool,
+    force: bool,
+) -> None:
     """
     Import zones and records from the Hetzner DNS API.
 
@@ -624,7 +695,7 @@ def import_zones(ctx, domain, all, no_txt_concat, force):
     help="Show detailed output for all zones, including those without errors",
 )
 @click.pass_context
-def check_zones(ctx, domain, all, verbose):
+def check_zones(ctx: click.Context, domain: Optional[str], all: bool, verbose: bool) -> None:
     """
     Check DNS records against actual DNS entries.
 
@@ -679,7 +750,7 @@ def check_zones(ctx, domain, all, verbose):
         sys.exit(1)
 
 
-def process_txt_record_value(value, concat=True):
+def process_txt_record_value(value: str, concat: bool = True) -> str:
     """
     Normalize TXT record values for consistency.
 
@@ -702,7 +773,13 @@ def process_txt_record_value(value, concat=True):
     return value
 
 
-def import_single_zone(zone_data, client, yaml_handler, no_txt_concat=False, force=False):
+def import_single_zone(
+    zone_data: ZoneData,
+    client: HetznerDNSClient,
+    yaml_handler: YAMLHandler,
+    no_txt_concat: bool = False,
+    force: bool = False,
+) -> Optional[pathlib.Path]:
     """
     Import a single zone from Hetzner DNS API to local YAML storage.
 
@@ -740,13 +817,14 @@ def import_single_zone(zone_data, client, yaml_handler, no_txt_concat=False, for
     # Add records to zone
     for record_data in records_data.get("records", []):
         value = record_data["value"]
+        record_type = cast(RecordType, record_data["type"])
 
-        if record_data["type"] == "TXT":
+        if record_type == "TXT":
             value = process_txt_record_value(value, not no_txt_concat)
 
         record = Record(
             id=record_data["id"],
-            type=record_data["type"],
+            type=record_type,
             name=record_data["name"],
             value=value,
         )
@@ -759,7 +837,7 @@ def import_single_zone(zone_data, client, yaml_handler, no_txt_concat=False, for
     return file_path
 
 
-def check_zone_records(zone, verbose=False):
+def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Record]]:
     """
     Verify all zone records against live DNS and display comparison results.
 
@@ -830,7 +908,7 @@ def check_zone_records(zone, verbose=False):
 @click.argument("domain", required=True)
 @click.argument("record_names", required=True, nargs=-1)
 @click.pass_context
-def delete_record_cmd(ctx, domain, record_names):
+def delete_record_cmd(ctx: click.Context, domain: str, record_names: Tuple[str, ...]) -> None:
     """
     Delete one or more DNS records.
 
@@ -950,7 +1028,7 @@ def delete_record_cmd(ctx, domain, record_names):
 @click.argument("domain", required=False)
 @click.option("--all", is_flag=True, help="Update all zones")
 @click.pass_context
-def update_zones(ctx, domain, all):
+def update_zones(ctx: click.Context, domain: Optional[str], all: bool) -> None:
     """
     Check and update DNS records.
 
@@ -987,7 +1065,7 @@ def update_zones(ctx, domain, all):
         sys.exit(1)
 
 
-def process_zone_update(zone, yaml_handler, client):
+def process_zone_update(zone: Zone, yaml_handler: YAMLHandler, client: HetznerDNSClient) -> bool:
     """
     Update zone records in Hetzner DNS API based on local YAML configuration.
 
@@ -1018,14 +1096,13 @@ def process_zone_update(zone, yaml_handler, client):
         if click.confirm("Do you want to create the missing records?", default=True):
             create_records = []
             for record in missing_records:
-                create_records.append(
-                    {
-                        "zone_id": zone.id,
-                        "type": record.type,
-                        "name": record.name,
-                        "value": record.value,
-                    }
-                )
+                create_request: RecordCreateRequest = {
+                    "zone_id": zone.id,
+                    "type": record.type,
+                    "name": record.name,
+                    "value": record.value,
+                }
+                create_records.append(create_request)
 
             # Perform bulk create
             console.print(f"Creating [bold]{len(create_records)}[/] records...")
@@ -1035,9 +1112,10 @@ def process_zone_update(zone, yaml_handler, client):
             # Handle invalid records
             if "invalid_records" in result and result["invalid_records"]:
                 console.print("[bold red]Error:[/] Some records failed to create:")
-                for record in result["invalid_records"]:
-                    display_name = record["name"] if record["name"] else "@"
-                    console.print(f"  - {record['type']} {display_name} {record['value']}")
+                for record_data in result["invalid_records"]:
+                    invalid_record = cast(RecordData, record_data)
+                    display_name = invalid_record["name"] if invalid_record["name"] else "@"
+                    console.print(f"  - {invalid_record['type']} {display_name} {invalid_record['value']}")
 
             # Handle successfully created records
             if "records" in result and result["records"]:
@@ -1048,7 +1126,8 @@ def process_zone_update(zone, yaml_handler, client):
                     "Do you want to update the YAML file with the new record IDs?",
                     default=True,
                 ):
-                    for new_record in result["records"]:
+                    for new_record_data in result["records"]:
+                        new_record = cast(RecordData, new_record_data)
                         for record in zone.records:
                             if (
                                 record.type == new_record["type"]
@@ -1072,15 +1151,14 @@ def process_zone_update(zone, yaml_handler, client):
             # Prepare records for bulk update
             update_records = []
             for record in mismatch_records:
-                update_records.append(
-                    {
-                        "id": record.id,
-                        "type": record.type,
-                        "name": record.name,
-                        "value": record.value,
-                        "zone_id": zone.id,
-                    }
-                )
+                update_request: RecordUpdateRequest = {
+                    "id": record.id,
+                    "type": record.type,
+                    "name": record.name,
+                    "value": record.value,
+                    "zone_id": zone.id,
+                }
+                update_records.append(update_request)
 
             # Perform bulk update
             console.print(f"Updating [bold]{len(update_records)}[/] records...")
@@ -1089,9 +1167,10 @@ def process_zone_update(zone, yaml_handler, client):
 
             if "failed_records" in result and result["failed_records"]:
                 console.print("[bold red]Error:[/] Some records failed to update:")
-                for record in result["failed_records"]:
-                    display_name = record["name"] if record["name"] else "@"
-                    console.print(f"  - {record['type']} {display_name} {record['value']}")
+                for record_data in result["failed_records"]:
+                    failed_record = cast(RecordData, record_data)
+                    display_name = failed_record["name"] if failed_record["name"] else "@"
+                    console.print(f"  - {failed_record['type']} {display_name} {failed_record['value']}")
             else:
                 console.print("[green]All records updated successfully.[/]")
 

@@ -1,1 +1,5 @@
+# Dev tools
+/.claude/settings.local.json
+
+# YAML DB
 /zones/

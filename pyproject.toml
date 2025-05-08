@@ -23,8 +23,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy",
     "poethepoet",
     "ruff",
+    "types-Pygments",
+    "types-requests",
 ]
 
 [tool.uv]
@@ -43,11 +46,11 @@ target-version = "py310"
 format = { cmd = "ruff format hdem", help = "Format code with ruff" }
 formatcheck = { cmd = "ruff format --check hdem", help = "Check code format" }
 lint = { cmd = "ruff check --preview hdem", help = "Run ruff linter" }
-# typecheck = { cmd = "mypy hdem", help = "Run mypy type checker" }
+typecheck = { cmd = "mypy hdem", help = "Run mypy type checker" }
 check = { sequence = [
     "formatcheck",
     "lint",
-    # "typecheck",
+    "typecheck",
 ], help = "Run all checks" }
 fix = { sequence = [
     "format",
