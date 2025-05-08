@@ -1,5 +1,7 @@
 # Hetzner DNS Manager
 
+**Initial design document, might not be up to date!**
+
 Process the API specs in `dns_api.txt` (sorry about the format, had to copy & paste it manually). It's a pretty typical REST/JSON API.
 
 Ultrathink and write a SINGLE FILE executable Python script `dns-manager` to interact with that API.

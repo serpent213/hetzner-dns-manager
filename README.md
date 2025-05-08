@@ -12,6 +12,18 @@ Function scope is limited to managing records within existing zones for now.
 - Delete DNS records
 - Stores zone data in YAML files for easy manual editing
 
+## Example Workflow
+
+After initial import, add records to a zone YAML file with empty ID:
+
+![Adding a record to a zone YAML file](docs/demo_edit_add.webp)
+
+Then run *update* to push the change to the API and update the YAML file with the new ID:
+
+![Running the update command](docs/demo_update.webp)
+
+The same way you can update records and push those.
+
 ## Installation
 
 The script uses [PEP 723](https://thisdavej.com/share-python-scripts-like-a-pro-uv-and-pep-723-for-easy-deployment/) for dependency management, so it's self-contained. You'll need Python 3.10 or higher and typically a working installation of [`uv`](https://docs.astral.sh/uv/).
