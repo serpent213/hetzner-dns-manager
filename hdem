@@ -638,13 +638,22 @@ def check_zones(ctx, domain, all, verbose):
     try:
         if all:
             # Check all zones
+
+            # For proper spacing using newlines
+            newline_before_next_zone = False
+
             for file_path in ZONES_DIR.glob("*.yaml"):
                 domain_name = file_path.stem
                 zone = yaml_handler.read_zone(domain_name)
                 if zone:
+                    if newline_before_next_zone:
+                        console.print("")
+
                     result = check_zone_records(zone, verbose)
                     if result["missing_records"] or result["mismatch_records"]:
                         found_issues = True
+
+                    newline_before_next_zone = verbose or found_issues
 
             if found_issues:
                 sys.exit(1)
@@ -800,7 +809,7 @@ def check_zone_records(zone, verbose=False):
 
     # Only print output if there are issues or verbose mode is enabled
     if has_issues or verbose:
-        console.print(f"\n[bold]Checking zone:[/] {zone.name}")
+        console.print(f"[bold]Checking zone:[/] {zone.name}")
         console.print(table)
 
         if not has_issues:
@@ -853,15 +862,13 @@ def delete_record_cmd(ctx, domain, record_names):
             if len(matching_records) == 1:
                 # Only one record with this name
                 record = matching_records[0]
-                console.print(
-                    f"\nFound record: [bold]{record.type}[/] [green]{record_name}[/] [blue]{record.value}[/]"
-                )
+                console.print(f"Found record: [bold]{record.type}[/] [green]{record_name}[/] [blue]{record.value}[/]")
 
                 if click.confirm("Delete this record?", default=False):
                     records_to_delete.append(record)
             else:
                 # Multiple records with the same name
-                console.print(f"\nFound [bold]{len(matching_records)}[/] records with name '{record_name}':")
+                console.print(f"Found [bold]{len(matching_records)}[/] records with name '{record_name}':")
 
                 # Ask for confirmation for each record
                 for record in matching_records:
@@ -878,12 +885,12 @@ def delete_record_cmd(ctx, domain, record_names):
 
             # If no records were found at all, exit
             if not records_to_delete:
-                console.print("[yellow]No records to delete. Exiting.[/]")
+                console.print("\n[yellow]No records to delete. Exiting.[/]")
                 sys.exit(0)
 
         # If no records were selected for deletion
         if not records_to_delete:
-            console.print("[yellow]No records selected for deletion.[/]")
+            console.print("\n[yellow]No records selected for deletion.[/]")
             sys.exit(0)
 
         # Display summary of records to be deleted
@@ -990,7 +997,7 @@ def process_zone_update(zone, yaml_handler, client):
         client: HetznerDNSClient instance for API communication
 
     Returns:
-        True on successful completion
+        True on updated zone, False on no update required
     """
     check_result = check_zone_records(zone, verbose=False)
     missing_records = check_result["missing_records"]
@@ -999,7 +1006,7 @@ def process_zone_update(zone, yaml_handler, client):
     # If no missing or mismatched records, nothing to do
     if not missing_records and not mismatch_records:
         console.print("[green]All records match. No update needed.[/]")
-        return True
+        return False
 
     # Handle missing records first
     if missing_records:
