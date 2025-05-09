@@ -375,7 +375,6 @@ class YAMLHandler:
         zone = Zone(id=data["id"], name=data["name"], records=[])
 
         for record_data in data.get("records", []):
-            # Cast the record type to RecordType
             record_type = cast(RecordType, record_data["type"])
             record = Record(
                 id=record_data["id"],
@@ -432,20 +431,18 @@ def get_expected_hostname(hostname: str, zone_name: str) -> str:
         return f"{hostname}.{zone_name}"
 
 
-def check_dns_record(record: Record, zone_name: str) -> str:
+def setup_dns_resolver(zone_name: str) -> dns.resolver.Resolver:
     """
-    Verify if a DNS record matches its actual DNS entry using authoritative servers.
+    Set up a DNS resolver preferring authoritative nameservers for the zone.
 
     Args:
-        record: Record object to check against DNS
-        zone_name: Zone/domain name the record belongs to
+        zone_name: The zone/domain name to find authoritative nameservers for
 
     Returns:
-        Status string: 'match', 'mismatch', or 'missing'
+        Configured DNS resolver instance
     """
     resolver = dns.resolver.Resolver()
 
-    # First, get the authoritative nameservers for this domain
     try:
         ns_answers = dns.resolver.resolve(zone_name, "NS")
         if ns_answers:
@@ -476,6 +473,22 @@ def check_dns_record(record: Record, zone_name: str) -> str:
     except Exception:
         # If we can't get authoritative nameservers, continue with default resolver
         pass
+
+    return resolver
+
+
+def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Resolver) -> str:
+    """
+    Verify if a DNS record matches its actual DNS entry using authoritative servers.
+
+    Args:
+        record: Record object to check against DNS
+        zone_name: Zone/domain name the record belongs to
+        resolver: DNS resolver to use for lookups (preconfigured for the zone)
+
+    Returns:
+        Status string: 'match', 'mismatch', or 'missing'
+    """
 
     try:
         # Handle domain name formatting
@@ -847,9 +860,11 @@ def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Reco
     Returns:
         Dict with missing_records and mismatch_records lists
     """
-    # Track missing and mismatched records
     missing_records = []
     mismatch_records = []
+
+    # Set up DNS resolver for the zone pointing to authoritative servers
+    resolver = setup_dns_resolver(zone.name)
 
     table = Table(show_header=True)
     table.add_column("Type", style="cyan")
@@ -862,7 +877,7 @@ def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Reco
         if record.type == "SOA":
             continue
 
-        status_code = check_dns_record(record, zone.name)
+        status_code = check_dns_record(record, zone.name, resolver)
 
         # If the record has an id, we assume a rename
         if status_code == "missing" and record.id:
@@ -963,17 +978,14 @@ def delete_record_cmd(ctx: click.Context, domain: str, record_names: Tuple[str, 
                 console.print("\n[yellow]No records to delete. Exiting.[/]")
                 sys.exit(0)
 
-        # If no records were selected for deletion
         if not records_to_delete:
             console.print("\n[yellow]No records selected for deletion.[/]")
             sys.exit(0)
 
-        # Display summary of records to be deleted
         console.print(f"\n[bold]Summary:[/] {len(records_to_delete)} record(s) selected for deletion:")
         for record in records_to_delete:
             console.print(f"  - [bold]{record.type}[/] [green]{record.name}[/] [blue]{record.value}[/]")
 
-        # Final confirmation before proceeding with API calls
         if not click.confirm("Proceed with deletion?", default=False):
             console.print("[yellow]Deletion canceled.[/]")
             sys.exit(0)
@@ -989,7 +1001,6 @@ def delete_record_cmd(ctx: click.Context, domain: str, record_names: Tuple[str, 
             except Exception as e:
                 failed_deletions.append((record, str(e)))
 
-        # Report results
         if deleted_record_ids:
             console.print(f"[green]Successfully deleted {len(deleted_record_ids)} record(s) from Hetzner DNS.[/]")
 
@@ -999,7 +1010,6 @@ def delete_record_cmd(ctx: click.Context, domain: str, record_names: Tuple[str, 
                 display_name = record.name
                 console.print(f"  - {record.type} {display_name}: {error}")
 
-        # Ask user to update YAML file if any records were deleted
         if deleted_record_ids:
             if click.confirm(
                 "Do you want to update the YAML file to remove these records?",
