@@ -62,10 +62,22 @@ only-include = [
 ]
 
 [dependency-groups]
-dev = ["mypy", "poethepoet", "ruff", "types-Pygments", "types-requests"]
+dev = [
+    "mypy",
+    "poethepoet",
+    "pytest",
+    "ruff",
+    "types-Pygments",
+    "types-requests",
+]
 
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+pythonpath = ["."]
 
 [lint]
 select = ["E", "F", "I", "N", "W", "B", "PL", "C", "D", "UP", "ANN", "Q"]
@@ -78,16 +90,18 @@ line-length = 118
 target-version = "py310"
 
 [tool.poe.tasks]
-format = { cmd = "ruff format hdem", help = "Format code with ruff" }
-formatcheck = { cmd = "ruff format --check hdem", help = "Check code format" }
-lint = { cmd = "ruff check --preview hdem", help = "Run ruff linter" }
+format = { cmd = "ruff format hdem tests", help = "Format code with ruff" }
+formatcheck = { cmd = "ruff format --check hdem tests", help = "Check code format" }
+lint = { cmd = "ruff check --preview hdem tests", help = "Run ruff linter" }
 typecheck = { cmd = "mypy hdem", help = "Run mypy type checker" }
+test = { cmd = "pytest", help = "Run pytest tests" }
 check = { sequence = [
     "formatcheck",
     "lint",
     "typecheck",
+    "test",
 ], help = "Run all checks" }
 fix = { sequence = [
     "format",
-    { cmd = "ruff check --preview --fix --unsafe-fixes hdem" },
+    { cmd = "ruff check --preview --fix --unsafe-fixes hdem tests" },
 ], help = "Fix format and lint (unsafe)" }
