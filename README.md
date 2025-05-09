@@ -16,11 +16,11 @@ It is designed for small to medium installations with up to 100 zones. Function 
 
 After initial import, add records to a zone YAML file with empty ID:
 
-![Adding records to a zone YAML file](docs/demo_edit_add.webp)
+![Adding records to a zone YAML file](https://raw.githubusercontent.com/serpent213/hetzner-dns-manager/refs/tags/v0.2.0/docs/demo_edit_add.webp)
 
 Then run *update* to push the change to the API and update the YAML file with the new ID:
 
-![Running the update command](docs/demo_update.webp)
+![Running the update command](https://raw.githubusercontent.com/serpent213/hetzner-dns-manager/refs/tags/v0.2.0/docs/demo_update.webp)
 
 The same way you can update records and push those.
 
