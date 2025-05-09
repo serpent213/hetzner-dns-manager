@@ -37,7 +37,7 @@ from ruamel.yaml import YAML
 
 
 # Constants
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 API_BASE_URL = "https://dns.hetzner.com/api/v1"
 ZONES_DIR = pathlib.Path("./zones")
 

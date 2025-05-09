@@ -1,6 +1,6 @@
 [project]
 name = "hetzner-dns-manager"
-version = "0.1.0"
+version = "0.2.0"
 description = "Hetzner DNS Zone Manager"
 authors = [{ name = "Steffen Beyer", email = "steffen@beyer.io" }]
 readme = "README.md"
@@ -14,6 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Environment :: Console",
     "Intended Audience :: System Administrators",
     "Operating System :: OS Independent",
@@ -30,6 +31,7 @@ dependencies = [
 [project.urls]
 "Homepage" = "https://github.com/serpent213/hetzner-dns-manager"
 "Bug Tracker" = "https://github.com/serpent213/hetzner-dns-manager/issues"
+"Changelog" = "https://github.com/serpent213/hetzner-dns-manager/blob/master/CHANGELOG.md"
 
 [project.scripts]
 hdem = "hdem:cli"
@@ -47,6 +49,7 @@ only-include = [
     # wheel is built from sdist, so we need to include the build_hook.py
     "build_hook.py",
     "README.md",
+    "CHANGELOG.md",
     "docs/demo_edit_add.webp",
     "docs/demo_update.webp",
     "LICENSE",
@@ -56,6 +59,7 @@ only-include = [
 only-include = [
     "hdem.py",
     "README.md",
+    "CHANGELOG.md",
     "docs/demo_edit_add.webp",
     "docs/demo_update.webp",
     "LICENSE",
