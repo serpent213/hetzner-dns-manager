@@ -53,6 +53,16 @@ TLD_REGEX: str = r"[a-zA-Z]{2,}"
 PUBLIC_ZONE_REGEX: str = f"^({DNS_LABEL_REGEX}\\.)+{TLD_REGEX}$"
 # Domain name with optional trailing dot (FQDN or relative notation)
 FQDN_OR_RELATIVE_REGEX: str = f"^{DNS_LABEL_REGEX}(\\.{DNS_LABEL_REGEX})*\\.?$"
+# TXT record pattern - handles quoted strings with escaped chars and multi-part TXT records
+TXT_RECORD_REGEX: str = r"""
+    "               # start of first quoted string
+    (?:[^"\\]|\\.)* # content of the quoted string
+    "               # end of quoted string
+    (?:             # optionally, more quoted strings:
+        \s*         #   allow whitespace between them
+        "(?:[^"\\]|\\.)*" #   another quoted string
+    )*              # zero or more additional quoted strings
+"""
 
 
 # Global setup
@@ -195,8 +205,9 @@ class Record:
                     raise ValueError(f"Invalid MX priority in record: {self.value}")
 
             case "TXT":
-                # TXT records should be quoted
-                if not (self.value.startswith('"') and (self.value.endswith('"') or ' "' in self.value)):
+                # TXT records should be quoted with proper format
+                txt_pattern = re.compile(TXT_RECORD_REGEX, re.X)
+                if not txt_pattern.fullmatch(self.value):
                     raise ValueError(f"Invalid TXT record format: {self.value}. Value should be quoted")
 
             case "SOA":
@@ -449,8 +460,8 @@ def process_txt_record_value(value: str, concat: bool = True) -> str:
         return value
 
     # Extract content from quoted parts and concatenate
-    # Match patterns like "abc" "def" "ghi"
-    parts = re.findall(r'"([^"]*)"', value)
+    # Matches quoted segments handling escaped quotes correctly
+    parts = re.findall(r'"((?:[^"\\]|\\.)*)"', value)
     if parts:
         return f'"{("").join(parts)}"'
 
