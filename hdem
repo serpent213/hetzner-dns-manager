@@ -35,13 +35,40 @@ from rich.console import Console
 from rich.table import Table
 from ruamel.yaml import YAML
 
+
 # Constants
 VERSION = "0.1.0"
 API_BASE_URL = "https://dns.hetzner.com/api/v1"
 ZONES_DIR = pathlib.Path("./zones")
 
 
-# Define TypedDict classes for API responses
+# DNS validation regex patterns
+# Single DNS label (RFC 1035) - one component of a domain name
+DNS_LABEL_REGEX: str = r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
+# DNS label with underscore support (RFC 2181) - for service records
+SERVICE_LABEL_REGEX: str = r"[a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?"
+# Top-level domain pattern - alphabetic with at least 2 chars
+TLD_REGEX: str = r"[a-zA-Z]{2,}"
+# Public zone name pattern - requires valid TLD at the end (for Hetzner)
+PUBLIC_ZONE_REGEX: str = f"^({DNS_LABEL_REGEX}\\.)+{TLD_REGEX}$"
+# Domain name with optional trailing dot (FQDN or relative notation)
+FQDN_OR_RELATIVE_REGEX: str = f"^{DNS_LABEL_REGEX}(\\.{DNS_LABEL_REGEX})*\\.?$"
+
+
+# Global setup
+ZONES_DIR.mkdir(exist_ok=True)
+API_TOKEN: Optional[str] = os.environ.get("HETZNER_DNS_API_TOKEN")
+console: Console = Console()
+
+
+############################################################
+#
+#   Data Model
+#
+############################################################
+
+
+# API responses
 class ZoneData(TypedDict):
     id: str
     name: str
@@ -82,25 +109,6 @@ class BulkRecordResponse(TypedDict):
 
 # Record type literal for type checking
 RecordType = Literal["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "SRV", "CAA", "PTR"]
-
-
-# DNS validation regex patterns
-# Single DNS label (RFC 1035) - one component of a domain name
-DNS_LABEL_REGEX: str = r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
-# DNS label with underscore support (RFC 2181) - for service records
-SERVICE_LABEL_REGEX: str = r"[a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?"
-# Top-level domain pattern - alphabetic with at least 2 chars
-TLD_REGEX: str = r"[a-zA-Z]{2,}"
-# Public zone name pattern - requires valid TLD at the end (for Hetzner)
-PUBLIC_ZONE_REGEX: str = f"^({DNS_LABEL_REGEX}\\.)+{TLD_REGEX}$"
-# Domain name with optional trailing dot (FQDN or relative notation)
-FQDN_OR_RELATIVE_REGEX: str = f"^{DNS_LABEL_REGEX}(\\.{DNS_LABEL_REGEX})*\\.?$"
-
-
-# Global setup
-ZONES_DIR.mkdir(exist_ok=True)
-API_TOKEN: Optional[str] = os.environ.get("HETZNER_DNS_API_TOKEN")
-console: Console = Console()
 
 
 @dataclass
@@ -269,6 +277,13 @@ class Zone:
         self.records.sort(key=lambda r: (r.type, r.name))
 
 
+############################################################
+#
+#   Helper Classes
+#
+############################################################
+
+
 class HetznerDNSClient:
     """Client for interacting with the Hetzner DNS API."""
 
@@ -410,6 +425,100 @@ class YAMLHandler:
             self.yaml.dump(data, f)
 
         return file_path
+
+
+############################################################
+#
+#   Helper Functions
+#
+############################################################
+
+
+def process_txt_record_value(value: str, concat: bool = True) -> str:
+    """
+    Normalize TXT record values for consistency.
+
+    Args:
+        value: Original TXT record value
+        concat: If True, concatenate segmented values ('"abc" "def"' → '"abcdef"')
+
+    Returns:
+        Processed TXT record value
+    """
+    if not concat or not value.startswith('"') or '"' not in value[1:]:
+        return value
+
+    # Extract content from quoted parts and concatenate
+    # Match patterns like "abc" "def" "ghi"
+    parts = re.findall(r'"([^"]*)"', value)
+    if parts:
+        return f'"{("").join(parts)}"'
+
+    return value
+
+
+def import_single_zone(
+    zone_data: ZoneData,
+    client: HetznerDNSClient,
+    yaml_handler: YAMLHandler,
+    no_txt_concat: bool = False,
+    force: bool = False,
+) -> Optional[pathlib.Path]:
+    """
+    Import a single zone from Hetzner DNS API to local YAML storage.
+
+    Args:
+        zone_data: Dict with zone metadata from API response
+        client: HetznerDNSClient instance for API communication
+        yaml_handler: YAMLHandler instance for file operations
+        no_txt_concat: If True, preserve segmented TXT record format
+        force: If True, overwrite existing zone files without prompting
+
+    Returns:
+        Path to the saved YAML file or None if import was canceled
+    """
+    zone_id = zone_data["id"]
+    zone_name = zone_data["name"]
+
+    console.print(f"Importing zone: [bold]{zone_name}[/]")
+
+    # Check if zone file already exists
+    file_path = ZONES_DIR / f"{zone_name}.yaml"
+    if file_path.exists() and not force:
+        existing_zone = yaml_handler.read_zone(zone_name)
+        if existing_zone:
+            console.print(f"[yellow]Zone file already exists:[/] {file_path}")
+            console.print(f"Existing file contains [bold]{len(existing_zone.records)}[/] records.")
+
+            if not click.confirm("Do you want to overwrite the existing file?", default=False):
+                console.print("[yellow]Import canceled for this zone.[/]")
+                return None
+
+    records_data = client.get_zone_records(zone_id)
+
+    zone = Zone(id=zone_id, name=zone_name, records=[])
+
+    # Add records to zone
+    for record_data in records_data.get("records", []):
+        value = record_data["value"]
+        record_type = cast(RecordType, record_data["type"])
+
+        if record_type == "TXT":
+            value = process_txt_record_value(value, not no_txt_concat)
+
+        record = Record(
+            id=record_data["id"],
+            type=record_type,
+            name=record_data["name"],
+            value=value,
+        )
+        zone.records.append(record)
+
+    # Save zone to file
+    file_path = yaml_handler.write_zone(zone)
+    console.print(f"Saved to: [green]{file_path}[/] with [bold]{len(zone.records)}[/] records.")
+
+    return file_path
 
 
 def get_expected_hostname(hostname: str, zone_name: str) -> str:
@@ -595,260 +704,6 @@ def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Reso
         sys.exit(1)
 
 
-@click.group(invoke_without_command=True)
-@click.option(
-    "--dry",
-    is_flag=True,
-    help="Print the first API request that would be performed and then halt",
-)
-@click.option(
-    "--version",
-    is_flag=True,
-    help="Show the version and exit",
-)
-@click.pass_context
-def cli(ctx: click.Context, dry: bool, version: bool) -> None:
-    """
-    Hetzner DNS Manager - Manage DNS records with Hetzner DNS API and local YAML database.
-
-    Stores one YAML file per zone in the "./zones" directory. Provides commands for importing,
-    checking, updating, and deleting DNS records.
-
-    Requires HETZNER_DNS_API_TOKEN environment variable to be set to a valid API token.
-    """
-    if version:
-        click.echo(f"{VERSION} (hdem)")
-        sys.exit(0)
-
-    if ctx.invoked_subcommand is None:
-        click.echo(ctx.get_help())
-        sys.exit(0)
-
-    if not API_TOKEN:
-        console.print("[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set.")
-        sys.exit(1)
-
-    ctx.ensure_object(dict)
-
-    # Create API client and store in context
-    client = HetznerDNSClient(API_TOKEN, dry_run=dry)
-    ctx.obj["client"] = client
-
-
-@cli.command("import")
-@click.argument("domain", required=False)
-@click.option("--all", is_flag=True, help="Import all zones")
-@click.option("--no-txt-concat", is_flag=True, help="Don't concatenate TXT record values")
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Force overwrite existing zone files without confirmation",
-)
-@click.pass_context
-def import_zones(
-    ctx: click.Context,
-    domain: Optional[str],
-    all: bool,
-    no_txt_concat: bool,
-    force: bool,
-) -> None:
-    """
-    Import zones and records from the Hetzner DNS API.
-
-    Specify a domain name to import a single zone, or use --all to import all zones.
-
-    By default, TXT record values with multiple quoted parts (e.g., '"abc" "def"') will be
-    concatenated into a single quoted value (e.g., '"abcdef"'). Use --no-txt-concat to
-    disable this behavior.
-
-    If a zone file already exists, you'll be prompted for confirmation before overwriting.
-    Use --force to skip confirmation and overwrite existing files.
-    """
-    yaml_handler = YAMLHandler()
-    client = ctx.obj["client"]
-
-    try:
-        zones_data = client.get_all_zones()
-        zones = zones_data.get("zones", [])
-
-        if not zones:
-            console.print("[yellow]No zones found in your Hetzner DNS account.[/]")
-            return
-
-        if all:
-            # Import all zones
-            for zone_data in zones:
-                import_single_zone(zone_data, client, yaml_handler, no_txt_concat, force)
-
-        elif domain:
-            # Import specific zone
-            zone_data = next((z for z in zones if z["name"] == domain), None)
-
-            if not zone_data:
-                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in your Hetzner DNS account.")
-                return
-
-            import_single_zone(zone_data, client, yaml_handler, no_txt_concat, force)
-
-        else:
-            console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
-
-    except Exception as e:
-        console.print(f"[bold red]Error:[/] {str(e)}")
-        sys.exit(1)
-
-
-@cli.command("check")
-@click.argument("domain", required=False)
-@click.option("--all", is_flag=True, help="Check all zones")
-@click.option(
-    "--verbose",
-    is_flag=True,
-    help="Show detailed output for all zones, including those without errors",
-)
-@click.pass_context
-def check_zones(ctx: click.Context, domain: Optional[str], all: bool, verbose: bool) -> None:
-    """
-    Check DNS records against actual DNS entries.
-
-    Specify a domain name to check a single zone, or use --all to check all zones.
-
-    Note: Will not catch additional entries that are missing from the local database!
-    """
-    yaml_handler = YAMLHandler()
-    found_issues = False
-
-    try:
-        if all:
-            # Check all zones
-
-            # For proper spacing using newlines
-            newline_before_next_zone = False
-
-            for file_path in ZONES_DIR.glob("*.yaml"):
-                domain_name = file_path.stem
-                zone = yaml_handler.read_zone(domain_name)
-                if zone:
-                    if newline_before_next_zone:
-                        console.print("")
-
-                    result = check_zone_records(zone, verbose)
-                    if result["missing_records"] or result["mismatch_records"]:
-                        found_issues = True
-
-                    newline_before_next_zone = verbose or found_issues
-
-            if found_issues:
-                sys.exit(1)
-
-        elif domain:
-            # Check specific zone
-            zone = yaml_handler.read_zone(domain)
-
-            if not zone:
-                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
-                sys.exit(1)
-
-            result = check_zone_records(zone, verbose)
-            if result["missing_records"] or result["mismatch_records"]:
-                sys.exit(1)
-
-        else:
-            console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
-            sys.exit(1)
-
-    except Exception as e:
-        console.print(f"[bold red]Error:[/] {str(e)}")
-        sys.exit(1)
-
-
-def process_txt_record_value(value: str, concat: bool = True) -> str:
-    """
-    Normalize TXT record values for consistency.
-
-    Args:
-        value: Original TXT record value
-        concat: If True, concatenate segmented values ('"abc" "def"' → '"abcdef"')
-
-    Returns:
-        Processed TXT record value
-    """
-    if not concat or not value.startswith('"') or '"' not in value[1:]:
-        return value
-
-    # Extract content from quoted parts and concatenate
-    # Match patterns like "abc" "def" "ghi"
-    parts = re.findall(r'"([^"]*)"', value)
-    if parts:
-        return f'"{("").join(parts)}"'
-
-    return value
-
-
-def import_single_zone(
-    zone_data: ZoneData,
-    client: HetznerDNSClient,
-    yaml_handler: YAMLHandler,
-    no_txt_concat: bool = False,
-    force: bool = False,
-) -> Optional[pathlib.Path]:
-    """
-    Import a single zone from Hetzner DNS API to local YAML storage.
-
-    Args:
-        zone_data: Dict with zone metadata from API response
-        client: HetznerDNSClient instance for API communication
-        yaml_handler: YAMLHandler instance for file operations
-        no_txt_concat: If True, preserve segmented TXT record format
-        force: If True, overwrite existing zone files without prompting
-
-    Returns:
-        Path to the saved YAML file or None if import was canceled
-    """
-    zone_id = zone_data["id"]
-    zone_name = zone_data["name"]
-
-    console.print(f"Importing zone: [bold]{zone_name}[/]")
-
-    # Check if zone file already exists
-    file_path = ZONES_DIR / f"{zone_name}.yaml"
-    if file_path.exists() and not force:
-        existing_zone = yaml_handler.read_zone(zone_name)
-        if existing_zone:
-            console.print(f"[yellow]Zone file already exists:[/] {file_path}")
-            console.print(f"Existing file contains [bold]{len(existing_zone.records)}[/] records.")
-
-            if not click.confirm("Do you want to overwrite the existing file?", default=False):
-                console.print("[yellow]Import canceled for this zone.[/]")
-                return None
-
-    records_data = client.get_zone_records(zone_id)
-
-    zone = Zone(id=zone_id, name=zone_name, records=[])
-
-    # Add records to zone
-    for record_data in records_data.get("records", []):
-        value = record_data["value"]
-        record_type = cast(RecordType, record_data["type"])
-
-        if record_type == "TXT":
-            value = process_txt_record_value(value, not no_txt_concat)
-
-        record = Record(
-            id=record_data["id"],
-            type=record_type,
-            name=record_data["name"],
-            value=value,
-        )
-        zone.records.append(record)
-
-    # Save zone to file
-    file_path = yaml_handler.write_zone(zone)
-    console.print(f"Saved to: [green]{file_path}[/] with [bold]{len(zone.records)}[/] records.")
-
-    return file_path
-
-
 def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Record]]:
     """
     Verify all zone records against live DNS and display comparison results.
@@ -918,11 +773,295 @@ def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Reco
     return {"missing_records": missing_records, "mismatch_records": mismatch_records}
 
 
+def process_zone_update(zone: Zone, yaml_handler: YAMLHandler, client: HetznerDNSClient) -> bool:
+    """
+    Update zone records in Hetzner DNS API based on local YAML configuration.
+
+    Args:
+        zone: Zone object containing desired record state
+        yaml_handler: YAMLHandler instance for file operations
+        client: HetznerDNSClient instance for API communication
+
+    Returns:
+        True on updated zone, False on no update required
+    """
+    check_result = check_zone_records(zone, verbose=False)
+    missing_records = check_result["missing_records"]
+    mismatch_records = check_result["mismatch_records"]
+
+    # If no missing or mismatched records, nothing to do
+    if not missing_records and not mismatch_records:
+        console.print("[green]All records match. No update needed.[/]")
+        return False
+
+    # Handle missing records first
+    if missing_records:
+        console.print(f"\nFound [bold]{len(missing_records)}[/] missing records:")
+        for record in missing_records:
+            console.print(f"  - {record.type} {record.name} {record.value}")
+
+        # Ask for confirmation to create missing records
+        if click.confirm("Do you want to create the missing records?", default=True):
+            create_records = []
+            for record in missing_records:
+                create_request: RecordCreateRequest = {
+                    "zone_id": zone.id,
+                    "type": record.type,
+                    "name": record.name,
+                    "value": record.value,
+                }
+                create_records.append(create_request)
+
+            # Perform bulk create
+            console.print(f"Creating [bold]{len(create_records)}[/] records...")
+
+            result = client.bulk_create_records(create_records)
+
+            # Handle invalid records
+            if "invalid_records" in result and result["invalid_records"]:
+                console.print("[bold red]Error:[/] Some records failed to create:")
+                for record_data in result["invalid_records"]:
+                    invalid_record = cast(RecordData, record_data)
+                    console.print(f"  - {invalid_record['type']} {invalid_record['name']} {invalid_record['value']}")
+
+            # Handle successfully created records
+            if "records" in result and result["records"]:
+                console.print(f"[green]Successfully created {len(result['records'])} records.[/]")
+
+                # Ask user to update YAML files to include newly created IDs
+                if click.confirm(
+                    "Do you want to update the YAML file with the new record IDs?",
+                    default=True,
+                ):
+                    for new_record_data in result["records"]:
+                        new_record = cast(RecordData, new_record_data)
+                        for record in zone.records:
+                            if (
+                                record.type == new_record["type"]
+                                and record.name == new_record["name"]
+                                and record.value == new_record["value"]
+                            ):
+                                record.id = new_record["id"]
+
+                    # Save the updated zone
+                    file_path = yaml_handler.write_zone(zone)
+                    console.print(f"[green]Updated YAML file:[/] {file_path}")
+
+    # Handle mismatched records
+    if mismatch_records:
+        console.print(f"\nFound [bold]{len(mismatch_records)}[/] mismatched records:")
+        for record in mismatch_records:
+            console.print(f"  - {record.type} {record.name} {record.value}")
+
+        # Ask for confirmation to update mismatched records
+        if click.confirm("Do you want to update the mismatched records?", default=True):
+            # Prepare records for bulk update
+            update_records = []
+            for record in mismatch_records:
+                update_request: RecordUpdateRequest = {
+                    "id": record.id,
+                    "type": record.type,
+                    "name": record.name,
+                    "value": record.value,
+                    "zone_id": zone.id,
+                }
+                update_records.append(update_request)
+
+            # Perform bulk update
+            console.print(f"Updating [bold]{len(update_records)}[/] records...")
+
+            result = client.bulk_update_records(update_records)
+
+            if "failed_records" in result and result["failed_records"]:
+                console.print("[bold red]Error:[/] Some records failed to update:")
+                for record_data in result["failed_records"]:
+                    failed_record = cast(RecordData, record_data)
+                    console.print(f"  - {failed_record['type']} {failed_record['name']} {failed_record['value']}")
+            else:
+                console.print("[green]All records updated successfully.[/]")
+
+    return True
+
+
+############################################################
+#
+#   CLI Actions
+#
+############################################################
+
+
+@click.group(invoke_without_command=True)
+@click.option(
+    "--dry",
+    is_flag=True,
+    help="Print the first API request that would be performed and then halt",
+)
+@click.option(
+    "--version",
+    is_flag=True,
+    help="Show the version and exit",
+)
+@click.pass_context
+def cli(ctx: click.Context, dry: bool, version: bool) -> None:
+    """
+    Hetzner DNS Manager - Manage DNS records with Hetzner DNS API and local YAML database.
+
+    Stores one YAML file per zone in the "./zones" directory. Provides commands for importing,
+    checking, updating, and deleting DNS records.
+
+    Requires HETZNER_DNS_API_TOKEN environment variable to be set to a valid API token.
+    """
+    if version:
+        click.echo(f"{VERSION} (hdem)")
+        sys.exit(0)
+
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+        sys.exit(0)
+
+    if not API_TOKEN:
+        console.print("[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set.")
+        sys.exit(1)
+
+    ctx.ensure_object(dict)
+
+    # Create API client and store in context
+    client = HetznerDNSClient(API_TOKEN, dry_run=dry)
+    ctx.obj["client"] = client
+
+
+@cli.command("import")
+@click.argument("domain", required=False)
+@click.option("--all", is_flag=True, help="Import all zones")
+@click.option("--no-txt-concat", is_flag=True, help="Don't concatenate TXT record values")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Force overwrite existing zone files without confirmation",
+)
+@click.pass_context
+def cli_import_zones(
+    ctx: click.Context,
+    domain: Optional[str],
+    all: bool,
+    no_txt_concat: bool,
+    force: bool,
+) -> None:
+    """
+    Import zones and records from the Hetzner DNS API.
+
+    Specify a domain name to import a single zone, or use --all to import all zones.
+
+    By default, TXT record values with multiple quoted parts (e.g., '"abc" "def"') will be
+    concatenated into a single quoted value (e.g., '"abcdef"'). Use --no-txt-concat to
+    disable this behavior.
+
+    If a zone file already exists, you'll be prompted for confirmation before overwriting.
+    Use --force to skip confirmation and overwrite existing files.
+    """
+    yaml_handler = YAMLHandler()
+    client = ctx.obj["client"]
+
+    try:
+        zones_data = client.get_all_zones()
+        zones = zones_data.get("zones", [])
+
+        if not zones:
+            console.print("[yellow]No zones found in your Hetzner DNS account.[/]")
+            return
+
+        if all:
+            # Import all zones
+            for zone_data in zones:
+                import_single_zone(zone_data, client, yaml_handler, no_txt_concat, force)
+
+        elif domain:
+            # Import specific zone
+            zone_data = next((z for z in zones if z["name"] == domain), None)
+
+            if not zone_data:
+                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in your Hetzner DNS account.")
+                return
+
+            import_single_zone(zone_data, client, yaml_handler, no_txt_concat, force)
+
+        else:
+            console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {str(e)}")
+        sys.exit(1)
+
+
+@cli.command("check")
+@click.argument("domain", required=False)
+@click.option("--all", is_flag=True, help="Check all zones")
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Show detailed output for all zones, including those without errors",
+)
+@click.pass_context
+def cli_check_zones(ctx: click.Context, domain: Optional[str], all: bool, verbose: bool) -> None:
+    """
+    Check DNS records against actual DNS entries.
+
+    Specify a domain name to check a single zone, or use --all to check all zones.
+
+    Note: Will not catch additional entries that are missing from the local database!
+    """
+    yaml_handler = YAMLHandler()
+    found_issues = False
+
+    try:
+        if all:
+            # Check all zones
+
+            # For proper spacing using newlines
+            newline_before_next_zone = False
+
+            for file_path in ZONES_DIR.glob("*.yaml"):
+                domain_name = file_path.stem
+                zone = yaml_handler.read_zone(domain_name)
+                if zone:
+                    if newline_before_next_zone:
+                        console.print("")
+
+                    result = check_zone_records(zone, verbose)
+                    if result["missing_records"] or result["mismatch_records"]:
+                        found_issues = True
+
+                    newline_before_next_zone = verbose or found_issues
+
+            if found_issues:
+                sys.exit(1)
+
+        elif domain:
+            # Check specific zone
+            zone = yaml_handler.read_zone(domain)
+
+            if not zone:
+                console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
+                sys.exit(1)
+
+            result = check_zone_records(zone, verbose)
+            if result["missing_records"] or result["mismatch_records"]:
+                sys.exit(1)
+
+        else:
+            console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
+            sys.exit(1)
+
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {str(e)}")
+        sys.exit(1)
+
+
 @cli.command("delete")
 @click.argument("domain", required=True)
 @click.argument("record_names", required=True, nargs=-1)
 @click.pass_context
-def delete_record_cmd(ctx: click.Context, domain: str, record_names: Tuple[str, ...]) -> None:
+def cli_delete_records(ctx: click.Context, domain: str, record_names: Tuple[str, ...]) -> None:
     """
     Delete one or more DNS records.
 
@@ -1035,7 +1174,7 @@ def delete_record_cmd(ctx: click.Context, domain: str, record_names: Tuple[str, 
 @click.argument("domain", required=False)
 @click.option("--all", is_flag=True, help="Update all zones")
 @click.pass_context
-def update_zones(ctx: click.Context, domain: Optional[str], all: bool) -> None:
+def cli_update_zones(ctx: click.Context, domain: Optional[str], all: bool) -> None:
     """
     Check and update DNS records.
 
@@ -1070,116 +1209,6 @@ def update_zones(ctx: click.Context, domain: Optional[str], all: bool) -> None:
     except Exception as e:
         console.print(f"[bold red]Error:[/] {str(e)}")
         sys.exit(1)
-
-
-def process_zone_update(zone: Zone, yaml_handler: YAMLHandler, client: HetznerDNSClient) -> bool:
-    """
-    Update zone records in Hetzner DNS API based on local YAML configuration.
-
-    Args:
-        zone: Zone object containing desired record state
-        yaml_handler: YAMLHandler instance for file operations
-        client: HetznerDNSClient instance for API communication
-
-    Returns:
-        True on updated zone, False on no update required
-    """
-    check_result = check_zone_records(zone, verbose=False)
-    missing_records = check_result["missing_records"]
-    mismatch_records = check_result["mismatch_records"]
-
-    # If no missing or mismatched records, nothing to do
-    if not missing_records and not mismatch_records:
-        console.print("[green]All records match. No update needed.[/]")
-        return False
-
-    # Handle missing records first
-    if missing_records:
-        console.print(f"\nFound [bold]{len(missing_records)}[/] missing records:")
-        for record in missing_records:
-            console.print(f"  - {record.type} {record.name} {record.value}")
-
-        # Ask for confirmation to create missing records
-        if click.confirm("Do you want to create the missing records?", default=True):
-            create_records = []
-            for record in missing_records:
-                create_request: RecordCreateRequest = {
-                    "zone_id": zone.id,
-                    "type": record.type,
-                    "name": record.name,
-                    "value": record.value,
-                }
-                create_records.append(create_request)
-
-            # Perform bulk create
-            console.print(f"Creating [bold]{len(create_records)}[/] records...")
-
-            result = client.bulk_create_records(create_records)
-
-            # Handle invalid records
-            if "invalid_records" in result and result["invalid_records"]:
-                console.print("[bold red]Error:[/] Some records failed to create:")
-                for record_data in result["invalid_records"]:
-                    invalid_record = cast(RecordData, record_data)
-                    console.print(f"  - {invalid_record['type']} {invalid_record['name']} {invalid_record['value']}")
-
-            # Handle successfully created records
-            if "records" in result and result["records"]:
-                console.print(f"[green]Successfully created {len(result['records'])} records.[/]")
-
-                # Ask user to update YAML files to include newly created IDs
-                if click.confirm(
-                    "Do you want to update the YAML file with the new record IDs?",
-                    default=True,
-                ):
-                    for new_record_data in result["records"]:
-                        new_record = cast(RecordData, new_record_data)
-                        for record in zone.records:
-                            if (
-                                record.type == new_record["type"]
-                                and record.name == new_record["name"]
-                                and record.value == new_record["value"]
-                            ):
-                                record.id = new_record["id"]
-
-                    # Save the updated zone
-                    file_path = yaml_handler.write_zone(zone)
-                    console.print(f"[green]Updated YAML file:[/] {file_path}")
-
-    # Handle mismatched records
-    if mismatch_records:
-        console.print(f"\nFound [bold]{len(mismatch_records)}[/] mismatched records:")
-        for record in mismatch_records:
-            console.print(f"  - {record.type} {record.name} {record.value}")
-
-        # Ask for confirmation to update mismatched records
-        if click.confirm("Do you want to update the mismatched records?", default=True):
-            # Prepare records for bulk update
-            update_records = []
-            for record in mismatch_records:
-                update_request: RecordUpdateRequest = {
-                    "id": record.id,
-                    "type": record.type,
-                    "name": record.name,
-                    "value": record.value,
-                    "zone_id": zone.id,
-                }
-                update_records.append(update_request)
-
-            # Perform bulk update
-            console.print(f"Updating [bold]{len(update_records)}[/] records...")
-
-            result = client.bulk_update_records(update_records)
-
-            if "failed_records" in result and result["failed_records"]:
-                console.print("[bold red]Error:[/] Some records failed to update:")
-                for record_data in result["failed_records"]:
-                    failed_record = cast(RecordData, record_data)
-                    console.print(f"  - {failed_record['type']} {failed_record['name']} {failed_record['value']}")
-            else:
-                console.print("[green]All records updated successfully.[/]")
-
-    return True
 
 
 if __name__ == "__main__":
