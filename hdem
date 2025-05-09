@@ -586,7 +586,7 @@ def setup_dns_resolver(zone_name: str) -> dns.resolver.Resolver:
     return resolver
 
 
-def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Resolver) -> str:
+def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Resolver) -> Tuple[str, Optional[int]]:
     """
     Verify if a DNS record matches its actual DNS entry using authoritative servers.
 
@@ -596,7 +596,9 @@ def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Reso
         resolver: DNS resolver to use for lookups (preconfigured for the zone)
 
     Returns:
-        Status string: 'match', 'mismatch', or 'missing'
+        Tuple containing:
+        - Status string: 'match', 'mismatch', or 'missing'
+        - TTL value (if record exists, otherwise None)
     """
 
     try:
@@ -609,6 +611,9 @@ def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Reso
         # Try to resolve the record to detect if it exists
         try:
             answers = resolver.resolve(query_name, record.type)
+
+            # Get TTL from the first answer (all records in an RRset have the same TTL)
+            ttl = answers.rrset.ttl if answers and answers.rrset else None
 
             match record.type:
                 case "MX":
@@ -624,9 +629,9 @@ def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Reso
                         rdata_pref = getattr(rdata, "preference")
 
                         if rdata_host == expected_host and rdata_pref == priority_int:
-                            return "match"
+                            return "match", ttl
 
-                    return "mismatch"
+                    return "mismatch", ttl
 
                 case "TXT":
                     # Get the TXT record value from YAML
@@ -650,9 +655,9 @@ def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Reso
                         dns_value = dns_value.replace("b'", "").replace("'", "")
 
                         if dns_value == yaml_value:
-                            return "match"
+                            return "match", ttl
 
-                    return "mismatch"
+                    return "mismatch", ttl
 
                 case "CNAME":
                     expected_target = get_expected_hostname(record.value, zone_name)
@@ -661,9 +666,9 @@ def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Reso
                         dns_target = str(rdata).rstrip(".")  # Remove trailing dot if present
 
                         if dns_target == expected_target:
-                            return "match"
+                            return "match", ttl
 
-                    return "mismatch"
+                    return "mismatch", ttl
 
                 case "NS":
                     expected_ns = get_expected_hostname(record.value, zone_name)
@@ -672,24 +677,24 @@ def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Reso
                         dns_ns = str(rdata).rstrip(".")  # Remove trailing dot
 
                         if dns_ns == expected_ns:
-                            return "match"
+                            return "match", ttl
 
-                    return "mismatch"
+                    return "mismatch", ttl
 
                 case _:
                     # For other record types (A, AAAA, etc.)
                     for rdata in answers:
                         if str(rdata) == record.value:
-                            return "match"
+                            return "match", ttl
 
-                    return "mismatch"
+                    return "mismatch", ttl
 
         except dns.resolver.NXDOMAIN:
             # Domain doesn't exist
-            return "missing"
+            return "missing", None
         except dns.resolver.NoAnswer:
             # No answer from DNS for this record type
-            return "missing"
+            return "missing", None
 
     except dns.resolver.NoNameservers:
         # No nameservers could be reached
@@ -725,6 +730,7 @@ def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Reco
     table.add_column("Type", style="cyan")
     table.add_column("Name", style="green")
     table.add_column("Local Value", style="blue")
+    table.add_column("TTL", style="magenta", justify="right")
     table.add_column("Status", style="bold")
 
     for record in zone.records:
@@ -732,7 +738,7 @@ def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Reco
         if record.type == "SOA":
             continue
 
-        status_code = check_dns_record(record, zone.name, resolver)
+        status_code, ttl = check_dns_record(record, zone.name, resolver)
 
         # If the record has an id, we assume a rename
         if status_code == "missing" and record.id:
@@ -750,7 +756,9 @@ def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Reco
             case _:
                 status = f"[yellow]? Unknown ({status_code})[/]"
 
-        table.add_row(record.type, record.name, record.value, status)
+        ttl_str = str(ttl) if ttl is not None else "-"
+
+        table.add_row(record.type, record.name, record.value, ttl_str, status)
 
     has_issues = bool(missing_records or mismatch_records)
 
