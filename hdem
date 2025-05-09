@@ -47,6 +47,8 @@ ZONES_DIR = pathlib.Path("./zones")
 DNS_LABEL_REGEX: str = r"[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
 # DNS label with underscore support (RFC 2181) - for service records
 SERVICE_LABEL_REGEX: str = r"[a-zA-Z0-9_]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9_])?"
+# Service record name pattern
+SERVICE_RECORD_NAME_REGEX: str = f"^({SERVICE_LABEL_REGEX}\\.)*{SERVICE_LABEL_REGEX}$"
 # Top-level domain pattern - alphabetic with at least 2 chars
 TLD_REGEX: str = r"[a-zA-Z]{2,}"
 # Public zone name pattern - requires valid TLD at the end (for Hetzner)
@@ -55,14 +57,20 @@ PUBLIC_ZONE_REGEX: str = f"^({DNS_LABEL_REGEX}\\.)+{TLD_REGEX}$"
 FQDN_OR_RELATIVE_REGEX: str = f"^{DNS_LABEL_REGEX}(\\.{DNS_LABEL_REGEX})*\\.?$"
 # TXT record pattern - handles quoted strings with escaped chars and multi-part TXT records
 TXT_RECORD_REGEX: str = r"""
-    "               # start of first quoted string
-    (?:[^"\\]|\\.)* # content of the quoted string
-    "               # end of quoted string
-    (?:             # optionally, more quoted strings:
-        \s*         #   allow whitespace between them
-        "(?:[^"\\]|\\.)*" #   another quoted string
-    )*              # zero or more additional quoted strings
+    "                       # start of first quoted string
+    (?:[^"\\]|\\.)*         # content of the quoted string
+    "                       # end of quoted string
+    (?:                     # optionally, more quoted strings:
+        \s*                 #   allow whitespace between them
+        "(?:[^"\\]|\\.)*"   #   another quoted string
+    )*                      # zero or more additional quoted strings
 """
+
+# Precompiled regex patterns
+RE_PUBLIC_ZONE = re.compile(PUBLIC_ZONE_REGEX)
+RE_FQDN_OR_RELATIVE = re.compile(FQDN_OR_RELATIVE_REGEX)
+RE_SERVICE_RECORD_NAME = re.compile(SERVICE_RECORD_NAME_REGEX)
+RE_TXT_PATTERN = re.compile(TXT_RECORD_REGEX, re.X)
 
 
 # Global setup
@@ -166,8 +174,7 @@ class Record:
         # Validate record name according to RFC 1035, plus allow underscores for service records (RFC 2181)
         # Allow @ as shorthand for apex/root of zone
         if self.name != "@":
-            record_name_regex = f"^({SERVICE_LABEL_REGEX}\\.)*{SERVICE_LABEL_REGEX}$"
-            if not re.match(record_name_regex, self.name):
+            if not RE_SERVICE_RECORD_NAME.match(self.name):
                 raise ValueError(f"Invalid record name format: {self.name}")
 
         if not self.value:
@@ -206,8 +213,7 @@ class Record:
 
             case "TXT":
                 # TXT records should be quoted with proper format
-                txt_pattern = re.compile(TXT_RECORD_REGEX, re.X)
-                if not txt_pattern.fullmatch(self.value):
+                if not RE_TXT_PATTERN.fullmatch(self.value):
                     raise ValueError(f"Invalid TXT record format: {self.value}. Value should be quoted")
 
             case "SOA":
@@ -232,7 +238,7 @@ class Record:
                 if not self.value:
                     raise ValueError("CNAME record value cannot be empty")
 
-                if not re.match(FQDN_OR_RELATIVE_REGEX, self.value):
+                if not RE_FQDN_OR_RELATIVE.match(self.value):
                     raise ValueError(f"Invalid hostname format for CNAME record: {self.value}")
 
             case _:
@@ -269,7 +275,7 @@ class Zone:
             raise ValueError("Zone name cannot be empty")
 
         # Hetzner DNS only supports public domains with proper TLDs
-        if not re.match(PUBLIC_ZONE_REGEX, self.name):
+        if not RE_PUBLIC_ZONE.match(self.name):
             raise ValueError(f"Invalid domain name format for zone: {self.name}")
 
         # Validate records list
