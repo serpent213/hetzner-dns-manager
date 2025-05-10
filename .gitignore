@@ -1,3 +1,6 @@
+# YAML DB
+/zones/
+
 # Dev tools
 /.claude/settings.local.json
 
@@ -5,5 +8,12 @@
 *.egg-info/
 __pycache__/
 
-# YAML DB
-/zones/
+# Devenv
+.devenv*
+devenv.local.nix
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml
