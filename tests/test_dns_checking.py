@@ -7,6 +7,7 @@ These tests use mocking to avoid actual DNS queries.
 import pytest
 from unittest.mock import patch, MagicMock
 
+import click
 from hdem import Record, Zone, check_dns_record, setup_dns_resolver, check_zone_records
 
 
@@ -18,6 +19,13 @@ class TestDNSChecking:
         """Fixture to create a mock DNS resolver."""
         resolver = MagicMock()
         return resolver
+
+    @pytest.fixture
+    def mock_ctx(self):
+        """Fixture to create a mock Click context."""
+        ctx = MagicMock(spec=click.Context)
+        ctx.exit = MagicMock()
+        return ctx
 
     @patch("hdem.dns.resolver.Resolver")
     def test_setup_dns_resolver(self, mock_resolver_class):
@@ -52,7 +60,7 @@ class TestDNSChecking:
             # Verify the resolver was created and configured
             assert resolver.nameservers == ["192.0.2.1"]
 
-    def test_check_a_record_match(self, mock_resolver):
+    def test_check_a_record_match(self, mock_ctx, mock_resolver):
         """Test checking an A record that matches DNS."""
         # Create test record
         record = Record(id="01234567890123456789012345678901", type="A", name="www", value="192.0.2.1")
@@ -68,14 +76,14 @@ class TestDNSChecking:
         mock_resolver.resolve.return_value = mock_answer
 
         # Check the record
-        status, ttl = check_dns_record(record, "example.com", mock_resolver)
+        status, ttl = check_dns_record(mock_ctx, record, "example.com", mock_resolver)
 
         # Verify results
         assert status == "match"
         assert ttl == 3600
         mock_resolver.resolve.assert_called_once_with("www.example.com", "A")
 
-    def test_check_a_record_mismatch(self, mock_resolver):
+    def test_check_a_record_mismatch(self, mock_ctx, mock_resolver):
         """Test checking an A record that doesn't match DNS."""
         # Create test record
         record = Record(id="01234567890123456789012345678901", type="A", name="www", value="192.0.2.1")
@@ -91,14 +99,14 @@ class TestDNSChecking:
         mock_resolver.resolve.return_value = mock_answer
 
         # Check the record
-        status, ttl = check_dns_record(record, "example.com", mock_resolver)
+        status, ttl = check_dns_record(mock_ctx, record, "example.com", mock_resolver)
 
         # Verify results
         assert status == "mismatch"
         assert ttl == 3600
         mock_resolver.resolve.assert_called_once_with("www.example.com", "A")
 
-    def test_check_mx_record_match(self, mock_resolver):
+    def test_check_mx_record_match(self, mock_ctx, mock_resolver):
         """Test checking an MX record that matches DNS."""
         # Create test MX record
         record = Record(id="01234567890123456789012345678901", type="MX", name="@", value="10 mail.example.com.")
@@ -115,14 +123,14 @@ class TestDNSChecking:
         mock_resolver.resolve.return_value = mock_answer
 
         # Check the record
-        status, ttl = check_dns_record(record, "example.com", mock_resolver)
+        status, ttl = check_dns_record(mock_ctx, record, "example.com", mock_resolver)
 
         # Verify results
         assert status == "match"
         assert ttl == 3600
         mock_resolver.resolve.assert_called_once_with("example.com", "MX")
 
-    def test_check_txt_record_match(self, mock_resolver):
+    def test_check_txt_record_match(self, mock_ctx, mock_resolver):
         """Test checking a TXT record that matches DNS."""
         # Create test TXT record
         record = Record(
@@ -144,14 +152,14 @@ class TestDNSChecking:
         mock_resolver.resolve.return_value = mock_answer
 
         # Check the record
-        status, ttl = check_dns_record(record, "example.com", mock_resolver)
+        status, ttl = check_dns_record(mock_ctx, record, "example.com", mock_resolver)
 
         # Verify results
         assert status == "match"
         assert ttl == 3600
         mock_resolver.resolve.assert_called_once_with("txt.example.com", "TXT")
 
-    def test_check_cname_record_match(self, mock_resolver):
+    def test_check_cname_record_match(self, mock_ctx, mock_resolver):
         """Test checking a CNAME record that matches DNS."""
         # Create test CNAME record (relative format)
         record = Record(id="01234567890123456789012345678901", type="CNAME", name="alias", value="target")
@@ -167,14 +175,14 @@ class TestDNSChecking:
         mock_resolver.resolve.return_value = mock_answer
 
         # Check the record
-        status, ttl = check_dns_record(record, "example.com", mock_resolver)
+        status, ttl = check_dns_record(mock_ctx, record, "example.com", mock_resolver)
 
         # Verify results
         assert status == "match"
         assert ttl == 3600
         mock_resolver.resolve.assert_called_once_with("alias.example.com", "CNAME")
 
-    def test_check_missing_record(self, mock_resolver):
+    def test_check_missing_record(self, mock_ctx, mock_resolver):
         """Test checking a record that doesn't exist in DNS."""
         # Create test record
         record = Record(id="", type="A", name="nonexistent", value="192.0.2.1")
@@ -185,7 +193,7 @@ class TestDNSChecking:
         mock_resolver.resolve.side_effect = NXDOMAIN()
 
         # Check the record
-        status, ttl = check_dns_record(record, "example.com", mock_resolver)
+        status, ttl = check_dns_record(mock_ctx, record, "example.com", mock_resolver)
 
         # Verify results
         assert status == "missing"
@@ -194,7 +202,7 @@ class TestDNSChecking:
 
     @patch("hdem.setup_dns_resolver")
     @patch("hdem.check_dns_record")
-    def test_check_zone_records(self, mock_check_dns_record, mock_setup_resolver):
+    def test_check_zone_records(self, mock_check_dns_record, mock_setup_resolver, mock_ctx):
         """Test checking all records in a zone."""
         # Mock resolver setup
         mock_resolver = MagicMock()
@@ -215,7 +223,7 @@ class TestDNSChecking:
         zone = Zone(id="a1b2c3d4e5f6g7h8i9j0k1", name="example.com", records=records)
 
         # Configure mock responses for each record
-        def mock_check_record(record, zone_name, resolver):
+        def mock_check_record(ctx, record, zone_name, resolver):
             # SOA records are skipped in check_zone_records
             if record.type == "A":
                 return "match", 3600
@@ -228,7 +236,7 @@ class TestDNSChecking:
         mock_check_dns_record.side_effect = mock_check_record
 
         # Check the zone records
-        result = check_zone_records(zone, verbose=True)
+        result = check_zone_records(mock_ctx, zone, verbose=True)
 
         # Verify the results
         assert len(result["missing_records"]) == 0  # No missing records

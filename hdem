@@ -24,7 +24,6 @@ import ipaddress
 import os
 import pathlib
 import re
-import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple, TypedDict, cast
 
@@ -304,7 +303,8 @@ class Zone:
 class HetznerDNSClient:
     """Client for interacting with the Hetzner DNS API."""
 
-    def __init__(self, api_token: str, dry_run: bool = False) -> None:
+    def __init__(self, ctx: click.Context, api_token: str, dry_run: bool = False) -> None:
+        self.ctx = ctx
         self.api_token: str = api_token
         self.headers: Dict[str, str] = {
             "Auth-API-Token": api_token,
@@ -325,7 +325,7 @@ class HetznerDNSClient:
         console.print("Headers: {'Auth-API-Token': '***', 'Content-Type': 'application/json'}")
         if json:
             console.print(f"Payload: {json}")
-        sys.exit(0)
+        self.ctx.exit(0)
 
     def make_request(
         self,
@@ -355,7 +355,7 @@ class HetznerDNSClient:
             return response.json()
         except requests.exceptions.RequestException as e:
             console.print(f"[bold red]Error:[/] {str(e)}")
-            sys.exit(1)
+            self.ctx.exit(1)
 
     def get_all_zones(self) -> ZoneResponse:
         """Get all zones from the API."""
@@ -603,11 +603,14 @@ def setup_dns_resolver(zone_name: str) -> dns.resolver.Resolver:
     return resolver
 
 
-def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Resolver) -> Tuple[str, Optional[int]]:
+def check_dns_record(
+    ctx: click.Context, record: Record, zone_name: str, resolver: dns.resolver.Resolver
+) -> Tuple[str, Optional[int]]:
     """
     Verify if a DNS record matches its actual DNS entry using authoritative servers.
 
     Args:
+        ctx: Click context for exit handling
         record: Record object to check against DNS
         zone_name: Zone/domain name the record belongs to
         resolver: DNS resolver to use for lookups (preconfigured for the zone)
@@ -718,19 +721,20 @@ def check_dns_record(record: Record, zone_name: str, resolver: dns.resolver.Reso
         console.print(
             f"[bold red]Error:[/] checking DNS for {record.name}.{zone_name} ({record.type}): No nameservers could be reached"
         )
-        sys.exit(1)
+        ctx.exit(1)
 
     except Exception as e:
         # Any other error
         console.print(f"[bold red]Error:[/] checking DNS for {record.name}.{zone_name} ({record.type}): {e}")
-        sys.exit(1)
+        ctx.exit(1)
 
 
-def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Record]]:
+def check_zone_records(ctx: click.Context, zone: Zone, verbose: bool = False) -> Dict[str, List[Record]]:
     """
     Verify all zone records against live DNS and display comparison results.
 
     Args:
+        ctx: Click context for exit handling
         zone: Zone object containing records to check
         verbose: If True, show detailed output for all zones, including those without errors
 
@@ -755,7 +759,7 @@ def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Reco
         if record.type == "SOA":
             continue
 
-        status_code, ttl = check_dns_record(record, zone.name, resolver)
+        status_code, ttl = check_dns_record(ctx, record, zone.name, resolver)
 
         # If the record has an id, we assume a rename
         if status_code == "missing" and record.id:
@@ -798,11 +802,12 @@ def check_zone_records(zone: Zone, verbose: bool = False) -> Dict[str, List[Reco
     return {"missing_records": missing_records, "mismatch_records": mismatch_records}
 
 
-def process_zone_update(zone: Zone, yaml_handler: YAMLHandler, client: HetznerDNSClient) -> bool:
+def process_zone_update(ctx: click.Context, zone: Zone, yaml_handler: YAMLHandler, client: HetznerDNSClient) -> bool:
     """
     Update zone records in Hetzner DNS API based on local YAML configuration.
 
     Args:
+        ctx: Click context for exit handling
         zone: Zone object containing desired record state
         yaml_handler: YAMLHandler instance for file operations
         client: HetznerDNSClient instance for API communication
@@ -810,7 +815,7 @@ def process_zone_update(zone: Zone, yaml_handler: YAMLHandler, client: HetznerDN
     Returns:
         True on updated zone, False on no update required
     """
-    check_result = check_zone_records(zone, verbose=False)
+    check_result = check_zone_records(ctx, zone, verbose=False)
     missing_records = check_result["missing_records"]
     mismatch_records = check_result["mismatch_records"]
 
@@ -938,20 +943,20 @@ def cli(ctx: click.Context, dry: bool, version: bool) -> None:
     """
     if version:
         click.echo(f"{VERSION} (hdem)")
-        sys.exit(0)
+        ctx.exit(0)
 
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
-        sys.exit(0)
+        ctx.exit(0)
 
     if not API_TOKEN:
         console.print("[bold red]Error:[/] HETZNER_DNS_API_TOKEN environment variable is not set.")
-        sys.exit(1)
+        ctx.exit(1)
 
     ctx.ensure_object(dict)
 
     # Create API client and store in context
-    client = HetznerDNSClient(API_TOKEN, dry_run=dry)
+    client = HetznerDNSClient(ctx, API_TOKEN, dry_run=dry)
     ctx.obj["client"] = client
 
 
@@ -1015,7 +1020,7 @@ def cli_import_zones(
 
     except Exception as e:
         console.print(f"[bold red]Error:[/] {str(e)}")
-        sys.exit(1)
+        ctx.exit(1)
 
 
 @cli.command("check")
@@ -1052,14 +1057,14 @@ def cli_check_zones(ctx: click.Context, domain: Optional[str], all: bool, verbos
                     if newline_before_next_zone:
                         console.print("")
 
-                    result = check_zone_records(zone, verbose)
+                    result = check_zone_records(ctx, zone, verbose)
                     if result["missing_records"] or result["mismatch_records"]:
                         found_issues = True
 
                     newline_before_next_zone = verbose or found_issues
 
             if found_issues:
-                sys.exit(1)
+                ctx.exit(1)
 
         elif domain:
             # Check specific zone
@@ -1067,19 +1072,19 @@ def cli_check_zones(ctx: click.Context, domain: Optional[str], all: bool, verbos
 
             if not zone:
                 console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
-                sys.exit(1)
+                ctx.exit(1)
 
-            result = check_zone_records(zone, verbose)
+            result = check_zone_records(ctx, zone, verbose)
             if result["missing_records"] or result["mismatch_records"]:
-                sys.exit(1)
+                ctx.exit(1)
 
         else:
             console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
-            sys.exit(1)
+            ctx.exit(1)
 
     except Exception as e:
         console.print(f"[bold red]Error:[/] {str(e)}")
-        sys.exit(1)
+        ctx.exit(1)
 
 
 @cli.command("delete")
@@ -1100,7 +1105,7 @@ def cli_delete_records(ctx: click.Context, domain: str, record_names: Tuple[str,
 
         if not zone:
             console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
-            sys.exit(1)
+            ctx.exit(1)
 
         # Process each record name and handle multiple records with the same name
         records_to_delete = []
@@ -1140,11 +1145,11 @@ def cli_delete_records(ctx: click.Context, domain: str, record_names: Tuple[str,
             # If no records were found at all, exit
             if not records_to_delete:
                 console.print("\n[yellow]No records to delete. Exiting.[/]")
-                sys.exit(0)
+                ctx.exit(0)
 
         if not records_to_delete:
             console.print("\n[yellow]No records selected for deletion.[/]")
-            sys.exit(0)
+            ctx.exit(0)
 
         console.print(f"\n[bold]Summary:[/] {len(records_to_delete)} record(s) selected for deletion:")
         for record in records_to_delete:
@@ -1152,7 +1157,7 @@ def cli_delete_records(ctx: click.Context, domain: str, record_names: Tuple[str,
 
         if not click.confirm("Proceed with deletion?", default=False):
             console.print("[yellow]Deletion canceled.[/]")
-            sys.exit(0)
+            ctx.exit(0)
 
         # Delete records from API
         deleted_record_ids = []
@@ -1192,7 +1197,7 @@ def cli_delete_records(ctx: click.Context, domain: str, record_names: Tuple[str,
 
     except Exception as e:
         console.print(f"[bold red]Error:[/] {str(e)}")
-        sys.exit(1)
+        ctx.exit(1)
 
 
 @cli.command("update")
@@ -1215,7 +1220,7 @@ def cli_update_zones(ctx: click.Context, domain: Optional[str], all: bool) -> No
                 domain_name = file_path.stem
                 zone = yaml_handler.read_zone(domain_name)
                 if zone:
-                    process_zone_update(zone, yaml_handler, client)
+                    process_zone_update(ctx, zone, yaml_handler, client)
 
         elif domain:
             # Update specific zone
@@ -1223,17 +1228,17 @@ def cli_update_zones(ctx: click.Context, domain: Optional[str], all: bool) -> No
 
             if not zone:
                 console.print(f"[bold red]Error:[/] Domain '{domain}' not found in local database.")
-                sys.exit(1)
+                ctx.exit(1)
 
-            process_zone_update(zone, yaml_handler, client)
+            process_zone_update(ctx, zone, yaml_handler, client)
 
         else:
             console.print("[bold yellow]Please specify a domain or use --all flag.[/]")
-            sys.exit(1)
+            ctx.exit(1)
 
     except Exception as e:
         console.print(f"[bold red]Error:[/] {str(e)}")
-        sys.exit(1)
+        ctx.exit(1)
 
 
 if __name__ == "__main__":
