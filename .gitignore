@@ -3,6 +3,7 @@
 
 # Dev tools
 /.claude/settings.local.json
+/.coverage
 
 # Build artefacts
 *.egg-info/

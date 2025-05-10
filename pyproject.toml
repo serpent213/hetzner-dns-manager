@@ -28,6 +28,17 @@ dependencies = [
     "ruamel.yaml",
 ]
 
+[dependency-groups]
+dev = [
+    "mypy",
+    "poethepoet",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "types-Pygments",
+    "types-requests",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/serpent213/hetzner-dns-manager"
 "Bug Tracker" = "https://github.com/serpent213/hetzner-dns-manager/issues"
@@ -65,16 +76,6 @@ only-include = [
     "LICENSE",
 ]
 
-[dependency-groups]
-dev = [
-    "mypy",
-    "poethepoet",
-    "pytest",
-    "ruff",
-    "types-Pygments",
-    "types-requests",
-]
-
 [tool.uv]
 package = false
 
@@ -99,6 +100,10 @@ formatcheck = { cmd = "ruff format --check hdem tests", help = "Check code forma
 lint = { cmd = "ruff check --preview hdem tests", help = "Run ruff linter" }
 typecheck = { cmd = "mypy hdem", help = "Run mypy type checker" }
 test = { cmd = "pytest", help = "Run pytest tests" }
+test-cov = { sequence = [
+    { cmd = "pytest --cov=hdem" },
+    { cmd = "rm -f hdem.py" },
+], help = "Run tests with coverage report" }
 check = { sequence = [
     "formatcheck",
     "lint",

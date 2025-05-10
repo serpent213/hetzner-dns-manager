@@ -19,10 +19,11 @@ if not os.path.exists(hdem_py_path) and os.path.exists(hdem_path):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def cleanup_after_tests():
+def cleanup_after_tests(request):
     """Clean up the copied hdem.py file after all tests."""
     yield
 
-    # Clean up the temporary file
-    if os.path.exists(hdem_py_path):
+    # Clean up the temporary file only if coverage is not being measured
+    # This ensures the file remains available for coverage reporting
+    if os.path.exists(hdem_py_path) and not request.config.getoption("--cov", default=False):
         os.remove(hdem_py_path)
