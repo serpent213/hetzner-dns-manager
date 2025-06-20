@@ -5,7 +5,7 @@
 Update version numbers in these files:
 
 1. **pyproject.toml** - `version = "0.2.1"`
-2. **hdem** - `VERSION = "0.2.0"`
+2. **hdem** - `VERSION = "0.2.1"`
 
 ## Release Steps
 
@@ -19,7 +19,7 @@ Update version numbers in these files:
    ```bash
    # Set PyPI token (get from https://pypi.org/manage/account/token/)
    export UV_PUBLISH_TOKEN=pypi-...
-   uv publish
+   uv publish dist/hetzner_dns_manager-0.2.1*
    ```
 5. **Create git tag**:
    ```bash
