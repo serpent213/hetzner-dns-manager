@@ -5,7 +5,6 @@
 # dependencies = [
 #     "click",
 #     "dnspython",
-#     "ipaddress",
 #     "requests",
 #     "rich",
 #     "ruamel.yaml",
@@ -36,7 +35,7 @@ from ruamel.yaml import YAML
 
 
 # Constants
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 API_BASE_URL = "https://dns.hetzner.com/api/v1"
 ZONES_DIR = pathlib.Path("./zones")
 

@@ -1,6 +1,6 @@
 # Hetzner DNS Manager
 
-A command-line tool to interact with the [Hetzner DNS API](https://dns.hetzner.com/api-docs), allowing you to manage DNS records.
+A command-line tool to interact with the [Hetzner DNS API](https://dns.hetzner.com/api-docs), allowing you to manage DNS records by editing a set of YAML files.
 
 It is designed for small to medium installations with up to 100 zones. Function scope is limited to managing records within existing zones for now.
 
@@ -86,12 +86,14 @@ hdem import --all
 
 This will create YAML files in the `./zones` directory.
 
+Segmented TXT records (like "abc" "def") will be concatenated (to "abcdef") by default. This might be undesirable and can be disabled by passing `--no-txt-concat`.
+
 ### Check DNS Records
 
 Check a specific zone against actual DNS entries using one of the domain's authoritative servers:
 
 ```bash
-hdem check example.com
+hdem check --verbose example.com
 ```
 
 Check all zones:
@@ -118,7 +120,7 @@ hdem update --all
 
 To create new records, add to them to your zone YAML with empty ID field, which will be filled in after creation.
 
-### Delete a DNS Record
+### Delete DNS Records
 
 Delete a specific record by name:
 

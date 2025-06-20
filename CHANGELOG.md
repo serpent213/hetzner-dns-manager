@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.1 – 2025-05-09
+
+### Improved
+
+- Little README touch up
+- About 50% test coverage
+
 ## v0.2.0 – 2025-05-09
 
 ### Added
