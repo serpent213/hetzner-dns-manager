@@ -20,6 +20,10 @@ class TestZoneValidation:
         zone = Zone(id="a1b2c3d4e5f6g7h8i9j0k1", name="example.com")
         assert zone.id == "a1b2c3d4e5f6g7h8i9j0k1"
 
+        # Valid numeric Hetzner Cloud zone ID
+        zone = Zone(id="123456", name="example.com")
+        assert zone.id == "123456"
+
     def test_invalid_zone_id(self):
         """Test that invalid zone IDs are rejected."""
         # Non-string ID
@@ -31,15 +35,15 @@ class TestZoneValidation:
             Zone(id="", name="example.com")
 
         # ID with invalid characters
-        with pytest.raises(ValueError, match="Zone ID .* must be a 22-character alphanumeric string"):
+        with pytest.raises(ValueError, match="Zone ID .* must be a numeric or 21/22-character alphanumeric string"):
             Zone(id="a1b2c3d4e5f6g7h8i9j0k1!", name="example.com")
 
         # ID too short
-        with pytest.raises(ValueError, match="Zone ID .* must be a 22-character alphanumeric string"):
+        with pytest.raises(ValueError, match="Zone ID .* must be a numeric or 21/22-character alphanumeric string"):
             Zone(id="a1b2c3d", name="example.com")
 
         # ID too long
-        with pytest.raises(ValueError, match="Zone ID .* must be a 22-character alphanumeric string"):
+        with pytest.raises(ValueError, match="Zone ID .* must be a numeric or 21/22-character alphanumeric string"):
             Zone(id="a1b2c3d4e5f6g7h8i9j0k123", name="example.com")
 
     def test_valid_zone_names(self):

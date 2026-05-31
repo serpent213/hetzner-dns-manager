@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "click",
     "dnspython",
-    "requests",
+    "hcloud",
     "rich",
     "ruamel.yaml",
 ]
@@ -35,7 +35,6 @@ dev = [
     "pytest-cov",
     "ruff",
     "types-Pygments",
-    "types-requests",
 ]
 
 [project.urls]

@@ -1,12 +1,12 @@
 # Hetzner DNS Manager
 
-A command-line tool to interact with the [Hetzner DNS API](https://dns.hetzner.com/api-docs), allowing you to manage DNS records by editing a set of YAML files.
+A command-line tool to interact with the [Hetzner Cloud DNS API](https://docs.hetzner.cloud/reference/cloud#tag/zones), allowing you to manage DNS records by editing a set of YAML files.
 
 It is designed for small to medium installations with up to 100 zones. Function scope is limited to managing records within existing zones for now.
 
 ## Features
 
-- Import zones and records from the Hetzner DNS API
+- Import zones and records from the Hetzner Cloud DNS API
 - Check DNS records against actual DNS entries
 - Create missing and update mismatched DNS records
 - Delete DNS records
@@ -14,11 +14,11 @@ It is designed for small to medium installations with up to 100 zones. Function 
 
 ## Example Workflow
 
-After initial import, add records to a zone YAML file with empty ID:
+After initial import, add records to an RRSet in a zone YAML file:
 
 ![Adding records to a zone YAML file](https://raw.githubusercontent.com/serpent213/hetzner-dns-manager/refs/tags/v0.2.0/docs/demo_edit_add.webp)
 
-Then run *update* to push the change to the API and update the YAML file with the new ID:
+Then run *update* to push the change to the API:
 
 ![Running the update command](https://raw.githubusercontent.com/serpent213/hetzner-dns-manager/refs/tags/v0.2.0/docs/demo_update.webp)
 
@@ -58,10 +58,10 @@ After installation, you'll have access to the `hdem` command in your terminal.
 
 ## Configuration
 
-Set your Hetzner DNS API token as an environment variable:
+Set your Hetzner Cloud API token as an environment variable:
 
 ```bash
-export HETZNER_DNS_API_TOKEN="your_api_token_here"
+export HCLOUD_TOKEN="your_api_token_here"
 ```
 
 You may want to add this to your shell profile file (`.bashrc`, `.zshrc`, etc.) for persistence.
@@ -118,7 +118,7 @@ Check and update mismatched records for all zones:
 hdem update --all
 ```
 
-To create new records, add to them to your zone YAML with empty ID field, which will be filled in after creation.
+To create new records, add them to the relevant RRSet in your zone YAML. To create a new name/type pair, add a new RRSet.
 
 ### Delete DNS Records
 
@@ -130,27 +130,45 @@ hdem delete example.com www
 
 If there is more than one candidate, hdem will ask you which records to delete.
 
+### Migrate Local YAML Files
+
+Rewrite a legacy flat `records:` file into the native RRSet format:
+
+```bash
+hdem migrate example.com
+```
+
+Rewrite all local zone files:
+
+```bash
+hdem migrate --all
+```
+
 ## Data Structure
 
-The YAML files in the `./zones` directory follow this structure:
+The YAML files in the `./zones` directory follow this RRSet-based structure:
 
 ```yaml
-id: ZoneID
+version: 2
+id: 123456
 name: example.com
-records:
-  - id: RecordID1
+ttl: 86400
+rrsets:
+  - name: www
     type: A
-    name: www
-    value: 192.0.2.1
-  - id: RecordID2
+    records:
+      - value: 192.0.2.1
+  - name: '@'
     type: MX
-    name: '@'
-    value: '10 mail.example.com.'
+    records:
+      - value: '10 mail.example.com.'
 ```
+
+Older flat `records:` files are still accepted when reading. Normal writes preserve the file format that was read. Use `hdem migrate example.com` or `hdem migrate --all` to rewrite local files in the RRSet format.
 
 ## Related Projects
 
-Some other tools dealing with the Hetzner DNS API (that are not dynamic DNS updaters):
+Some other tools dealing with Hetzner DNS (that are not dynamic DNS updaters):
 
 - [hetzner-dns-tools: A simple Hetzner DNS API client for Python and Bash](https://github.com/arcanemachine/hetzner-dns-tools)
 - [hdns_cli: Hetzner DNS CLI Tool](https://github.com/lanbugs/hdns_cli/)
