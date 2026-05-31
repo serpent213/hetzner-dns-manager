@@ -37,9 +37,9 @@ try:
     from hcloud.zones.domain import ZoneRecord as HCloudZoneRecord
     from hcloud.zones.domain import ZoneRRSet as HCloudZoneRRSet
 except ImportError:  # pragma: no cover - exercised only in incomplete local environments
-    HCloudClient = None  # type: ignore[assignment]
-    HCloudZoneRecord = None  # type: ignore[assignment]
-    HCloudZoneRRSet = None  # type: ignore[assignment]
+    HCloudClient = None  # type: ignore[misc, assignment]
+    HCloudZoneRecord = None  # type: ignore[misc, assignment]
+    HCloudZoneRRSet = None  # type: ignore[misc, assignment]
 
 
 # Constants
@@ -261,9 +261,7 @@ class RRSet:
         seen_values = set()
         for record in self.records:
             if record.name != self.name or record.type != self.type:
-                raise ValueError(
-                    f"RRSet {self.id} contains mismatched record {record.name}/{record.type}"
-                )
+                raise ValueError(f"RRSet {self.id} contains mismatched record {record.name}/{record.type}")
 
             key = (record.value, record.comment)
             if key in seen_values:
@@ -344,10 +342,7 @@ def records_to_rrsets(records: Iterable[Record]) -> List[RRSet]:
     for record in records:
         grouped.setdefault((record.name, record.type), []).append(record)
 
-    return [
-        RRSet(name=name, type=record_type, records=records)
-        for (name, record_type), records in grouped.items()
-    ]
+    return [RRSet(name=name, type=record_type, records=records) for (name, record_type), records in grouped.items()]
 
 
 def rrsets_to_records(rrsets: Iterable[RRSet]) -> List[Record]:
@@ -521,10 +516,12 @@ class YAMLHandler:
 
     def _zone_to_legacy_yaml(self, zone: Zone) -> Dict[str, Any]:
         """Serialize a zone to the legacy flat records YAML shape."""
-        data = {
+        data: Dict[str, Any] = {
             "id": zone.id,
             "name": zone.name,
-            "records": [self._legacy_record_to_yaml(record) for record in sorted(zone.records, key=lambda r: (r.type, r.name))],
+            "records": [
+                self._legacy_record_to_yaml(record) for record in sorted(zone.records, key=lambda r: (r.type, r.name))
+            ],
         }
         if zone.ttl is not None:
             data["ttl"] = zone.ttl
@@ -676,7 +673,8 @@ def absolute_hostname(hostname: str, zone_name: str) -> str:
 def rrset_records_equal(left: RRSet, right: RRSet, zone_name: str) -> bool:
     """Compare two RRSets by normalized values and comments."""
     left_values = sorted(
-        (normalize_record_value(record.type, record.value, zone_name), record.comment or "") for record in left.records
+        (normalize_record_value(record.type, record.value, zone_name), record.comment or "")
+        for record in left.records
     )
     right_values = sorted(
         (normalize_record_value(record.type, record.value, zone_name), record.comment or "")
@@ -1027,24 +1025,13 @@ def process_zone_update(ctx: click.Context, zone: Zone, yaml_handler: YAMLHandle
     """
     try:
         remote_zone = client.zones.get(zone.name)
-        remote_rrsets = [
-            hcloud_rrset_to_rrset(rrset_data)
-            for rrset_data in client.zones.get_rrset_all(remote_zone)
-        ]
+        remote_rrsets = [hcloud_rrset_to_rrset(rrset_data) for rrset_data in client.zones.get_rrset_all(remote_zone)]
     except Exception as e:
         console.print(f"[bold red]Error:[/] Could not fetch zone '{zone.name}' from Hetzner Cloud: {e}")
         ctx.exit(1)
 
-    local_rrsets = {
-        (rrset.name, rrset.type): rrset
-        for rrset in zone.rrsets
-        if rrset.type != "SOA"
-    }
-    remote_rrsets_by_key = {
-        (rrset.name, rrset.type): rrset
-        for rrset in remote_rrsets
-        if rrset.type != "SOA"
-    }
+    local_rrsets = {(rrset.name, rrset.type): rrset for rrset in zone.rrsets if rrset.type != "SOA"}
+    remote_rrsets_by_key = {(rrset.name, rrset.type): rrset for rrset in remote_rrsets if rrset.type != "SOA"}
 
     missing_rrsets = []
     mismatch_rrsets = []
@@ -1077,7 +1064,9 @@ def process_zone_update(ctx: click.Context, zone: Zone, yaml_handler: YAMLHandle
         return False
 
     if protected_rrsets:
-        console.print("[yellow]Skipping apex NS mismatch; Hetzner Cloud manages authoritative NS records strictly.[/]")
+        console.print(
+            "[yellow]Skipping apex NS mismatch; Hetzner Cloud manages authoritative NS records strictly.[/]"
+        )
 
     # Handle missing RRSets first
     if missing_rrsets:
@@ -1479,8 +1468,8 @@ def cli_delete_records(ctx: click.Context, domain: str, record_names: Tuple[str,
             ctx.exit(0)
 
         # Delete records from API by replacing or deleting their parent RRSets.
-        deleted_records = []
-        failed_deletions = []
+        deleted_records: List[Record] = []
+        failed_deletions: List[Tuple[Record, str]] = []
 
         try:
             remote_zone = client.zones.get(zone.name)
@@ -1554,7 +1543,9 @@ def cli_delete_records(ctx: click.Context, domain: str, record_names: Tuple[str,
                 "Do you want to update the YAML file to remove these records?",
                 default=True,
             ):
-                deleted_keys = {(record.name, record.type, record.value, record.comment) for record in deleted_records}
+                deleted_keys = {
+                    (record.name, record.type, record.value, record.comment) for record in deleted_records
+                }
                 remaining_rrsets = []
                 for rrset in zone.rrsets:
                     rrset.records = [
