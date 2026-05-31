@@ -7,12 +7,14 @@
 - Manage Hetzner Cloud DNS zones through the official `hcloud-python` client and `HCLOUD_TOKEN`.
 - Add native RRSet YAML support while keeping legacy flat `records:` files readable.
 - Add `hdem migrate [DOMAIN]` and `hdem migrate --all` for explicit v2 YAML migration.
+- Add `--zones-dir` and `HDEM_ZONES_DIR` for selecting the local zone inventory directory.
 
 ### Changed
 
 - Preserve the source YAML format on normal writes; only `migrate` rewrites legacy files to RRSet format.
 - Apply updates and deletes through Cloud DNS RRSet operations instead of old per-record bulk endpoints.
 - Update documentation and dependency metadata for the Hetzner Cloud DNS API.
+- Create the local zones directory only when writing zone files.
 
 ### Removed
 

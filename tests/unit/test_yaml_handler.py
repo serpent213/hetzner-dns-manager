@@ -2,7 +2,10 @@
 Tests for YAML format compatibility.
 """
 
-from hdem import YAMLHandler
+from click.testing import CliRunner
+
+import hdem
+from hdem import YAMLHandler, cli
 
 
 def test_read_legacy_records_format(tmp_path, monkeypatch):
@@ -118,3 +121,77 @@ records:
     assert "version: 2" in written
     assert "rrsets:" in written
     assert "0123456789abcdef0123456789abcdef" not in written
+
+
+def test_migrate_uses_zones_dir_option(tmp_path):
+    """The CLI can operate on a non-default zones directory."""
+    original_zones_dir = hdem.ZONES_DIR
+    zones_dir = tmp_path / "inventory"
+    zones_dir.mkdir()
+    (zones_dir / "example.com.yaml").write_text(
+        """
+id: oldZoneId123456789012
+name: example.com
+records:
+  - id: 0123456789abcdef0123456789abcdef
+    type: A
+    name: www
+    value: 192.0.2.1
+""".lstrip()
+    )
+
+    try:
+        result = CliRunner().invoke(cli, ["--zones-dir", str(zones_dir), "migrate", "example.com"])
+    finally:
+        hdem.ZONES_DIR = original_zones_dir
+
+    assert result.exit_code == 0
+    written = (zones_dir / "example.com.yaml").read_text()
+    assert "version: 2" in written
+    assert "rrsets:" in written
+
+
+def test_migrate_uses_zones_dir_env(tmp_path):
+    """The CLI can read the zones directory from HDEM_ZONES_DIR."""
+    original_zones_dir = hdem.ZONES_DIR
+    zones_dir = tmp_path / "inventory"
+    zones_dir.mkdir()
+    (zones_dir / "example.com.yaml").write_text(
+        """
+id: oldZoneId123456789012
+name: example.com
+records:
+  - id: 0123456789abcdef0123456789abcdef
+    type: A
+    name: www
+    value: 192.0.2.1
+""".lstrip()
+    )
+
+    try:
+        result = CliRunner().invoke(cli, ["migrate", "example.com"], env={"HDEM_ZONES_DIR": str(zones_dir)})
+    finally:
+        hdem.ZONES_DIR = original_zones_dir
+
+    assert result.exit_code == 0
+    written = (zones_dir / "example.com.yaml").read_text()
+    assert "version: 2" in written
+    assert "rrsets:" in written
+
+
+def test_write_creates_missing_zones_dir(tmp_path, monkeypatch):
+    """Writing a zone creates the configured directory only when needed."""
+    zones_dir = tmp_path / "missing"
+    monkeypatch.setattr("hdem.ZONES_DIR", zones_dir)
+
+    zone = YAMLHandler()._read_legacy_zone(
+        {
+            "id": "oldZoneId123456789012",
+            "name": "example.com",
+            "records": [{"id": "", "type": "A", "name": "www", "value": "192.0.2.1"}],
+        }
+    )
+
+    YAMLHandler().write_zone(zone)
+
+    assert (zones_dir / "example.com.yaml").exists()

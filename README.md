@@ -66,9 +66,17 @@ export HCLOUD_TOKEN="your_api_token_here"
 
 You may want to add this to your shell profile file (`.bashrc`, `.zshrc`, etc.) for persistence.
 
+By default, hdem reads and writes zone files in `./zones`. Use `--zones-dir` or `HDEM_ZONES_DIR`
+to select a different inventory:
+
+```bash
+hdem --zones-dir ./live-zones check --all
+export HDEM_ZONES_DIR="$HOME/infrastructure/dns"
+```
+
 ## Usage
 
-The database will be created in `./zones` and consists of one YAML file per zone.
+The database consists of one YAML file per zone in the configured zones directory.
 
 ### Import Zones and Records
 
@@ -84,7 +92,7 @@ Import all zones:
 hdem import --all
 ```
 
-This will create YAML files in the `./zones` directory.
+This will create YAML files in the configured zones directory.
 
 Segmented TXT records (like "abc" "def") will be concatenated (to "abcdef") by default. This might be undesirable and can be disabled by passing `--no-txt-concat`.
 
@@ -146,7 +154,7 @@ hdem migrate --all
 
 ## Data Structure
 
-The YAML files in the `./zones` directory follow this RRSet-based structure:
+The YAML files in the configured zones directory follow this RRSet-based structure:
 
 ```yaml
 version: 2

@@ -13,7 +13,7 @@
 """
 Hetzner DNS Manager
 
-A command-line tool for managing Hetzner DNS records with a local YAML database.
+A command-line tool for managing Hetzner Cloud DNS records with a local YAML database.
 Allows importing, checking, updating, and deleting DNS records.
 
 Designed and implemented in 2025 by Steffen Beyer (and Claude Code).
@@ -45,7 +45,8 @@ except ImportError:  # pragma: no cover - exercised only in incomplete local env
 # Constants
 VERSION = "0.3.0"
 API_BASE_URL = "https://api.hetzner.cloud/v1"
-ZONES_DIR = pathlib.Path("./zones")
+DEFAULT_ZONES_DIR = pathlib.Path(os.environ.get("HDEM_ZONES_DIR", "./zones"))
+ZONES_DIR = DEFAULT_ZONES_DIR
 
 
 # DNS validation regex patterns
@@ -80,7 +81,6 @@ RE_TXT_PATTERN = re.compile(TXT_RECORD_REGEX, re.X)
 
 
 # Global setup
-ZONES_DIR.mkdir(exist_ok=True)
 API_TOKEN: Optional[str] = os.environ.get("HCLOUD_TOKEN")
 console: Console = Console()
 
@@ -492,6 +492,7 @@ class YAMLHandler:
 
     def write_zone(self, zone: Zone, file_format: Optional[ZoneFileFormat] = None) -> pathlib.Path:
         """Write a zone file to disk."""
+        ZONES_DIR.mkdir(parents=True, exist_ok=True)
         file_path = ZONES_DIR / f"{zone.name}.yaml"
         target_format = file_format or zone.source_format
 
@@ -1170,16 +1171,27 @@ def process_zone_update(ctx: click.Context, zone: Zone, yaml_handler: YAMLHandle
     is_flag=True,
     help="Show the version and exit",
 )
+@click.option(
+    "--zones-dir",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=pathlib.Path),
+    envvar="HDEM_ZONES_DIR",
+    default=DEFAULT_ZONES_DIR,
+    show_default="./zones",
+    help="Directory containing zone YAML files. Can also be set with HDEM_ZONES_DIR.",
+)
 @click.pass_context
-def cli(ctx: click.Context, dry: bool, version: bool) -> None:
+def cli(ctx: click.Context, dry: bool, version: bool, zones_dir: pathlib.Path) -> None:
     """
-    Hetzner DNS Manager - Manage DNS records with Hetzner DNS API and local YAML database.
+    Hetzner DNS Manager - Manage DNS records with Hetzner Cloud DNS API and local YAML database.
 
-    Stores one YAML file per zone in the "./zones" directory. Provides commands for importing,
+    Stores one YAML file per zone in the configured zones directory. Provides commands for importing,
     checking, updating, and deleting DNS records.
 
     Requires HCLOUD_TOKEN environment variable to be set to a valid Hetzner Cloud API token.
     """
+    global ZONES_DIR
+    ZONES_DIR = zones_dir.expanduser()
+
     if version:
         click.echo(f"{VERSION} (hdem)")
         ctx.exit(0)
@@ -1224,7 +1236,7 @@ def cli_import_zones(
     force: bool,
 ) -> None:
     """
-    Import zones and records from the Hetzner DNS API.
+    Import zones and records from the Hetzner Cloud DNS API.
 
     Specify a domain name to import a single zone, or use --all to import all zones.
 
