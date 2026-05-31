@@ -1,6 +1,6 @@
 [project]
 name = "hetzner-dns-manager"
-version = "0.2.1"
+version = "0.3.0"
 description = "Hetzner DNS Zone Manager"
 authors = [{ name = "Steffen Beyer", email = "steffen@beyer.io" }]
 readme = "README.md"
