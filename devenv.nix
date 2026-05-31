@@ -15,5 +15,7 @@
     };
   };
 
+  env.UV_NO_MANAGED_PYTHON = "false";
+
   # See full reference at https://devenv.sh/reference/options/
 }
