@@ -1053,15 +1053,26 @@ def process_zone_update(ctx: click.Context, zone: Zone, yaml_handler: YAMLHandle
         if key not in local_rrsets and not (rrset.name == "@" and rrset.type == "NS")
     ]
 
+    added_remote_rrsets = False
+    if extra_rrsets:
+        console.print(
+            f"\nFound [bold]{len(extra_rrsets)}[/] RRSet(s) present in Hetzner Cloud but missing from local YAML:"
+        )
+        for rrset in extra_rrsets:
+            values = ", ".join(record.value for record in rrset.records)
+            console.print(f"  - {rrset.type} {rrset.name}: {values}")
+
+        if click.confirm("Do you want to add these RRSets to the local YAML file?", default=False):
+            zone.rrsets.extend(extra_rrsets)
+            zone.records = rrsets_to_records(zone.rrsets)
+            file_path = yaml_handler.write_zone(zone)
+            console.print(f"[green]Updated YAML file:[/] {file_path}")
+            added_remote_rrsets = True
+
     # If no missing or mismatched records, nothing to do
     if not missing_rrsets and not mismatch_rrsets and not protected_rrsets:
-        console.print("[green]All records match. No update needed.[/]")
-        if extra_rrsets:
-            console.print(
-                f"[yellow]Note:[/] Hetzner Cloud has {len(extra_rrsets)} RRSet(s) not present in local YAML. "
-                "Use import to refresh local state or delete explicitly."
-            )
-        return False
+        console.print("[green]All local records match Hetzner Cloud. No remote update needed.[/]")
+        return added_remote_rrsets
 
     if protected_rrsets:
         console.print(
