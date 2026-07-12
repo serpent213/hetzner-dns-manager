@@ -46,13 +46,13 @@
     pyprojectOverrides = final: prev: {
       # Fix ruamel-yaml-clib missing setuptools
       ruamel-yaml-clib = prev.ruamel-yaml-clib.overrideAttrs (old: {
-        nativeBuildInputs = old.nativeBuildInputs ++ [final.setuptools];
+        nativeBuildInputs = (old.nativeBuildInputs or []) ++ [final.setuptools];
       });
 
       # Custom build fixups for hetzner-dns-manager
       hetzner-dns-manager = prev.hetzner-dns-manager.overrideAttrs (old: {
         # Handle the build hook requirement
-        nativeBuildInputs = old.nativeBuildInputs ++ [final.hatchling];
+        nativeBuildInputs = (old.nativeBuildInputs or []) ++ [final.hatchling];
       });
     };
 
