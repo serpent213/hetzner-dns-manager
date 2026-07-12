@@ -12,6 +12,11 @@ This file provides guidance to Claude Code when working with code in this reposi
 - Run all checks: `uv run poe check`
 - Fix format and lint: `uv run poe fix`
 
+## Releasing
+
+See [RELEASE.md](RELEASE.md) for the release process. Note: `pyproject.toml`,
+`hdem` (`VERSION`), and `uv.lock` must all carry the same version.
+
 ## Code Style Guidelines
 
 - Python version: 3.10+
