@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - exercised only in incomplete local env
 
 
 # Constants
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 API_BASE_URL = "https://api.hetzner.cloud/v1"
 DEFAULT_ZONES_DIR = pathlib.Path(os.environ.get("HDEM_ZONES_DIR", "./zones"))
 ZONES_DIR = DEFAULT_ZONES_DIR

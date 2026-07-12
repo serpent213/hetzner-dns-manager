@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.0 – 2026-07-12
+
+### Added
+
+- Reconcile remote-only RRSets during update: list Hetzner-only RRSets before applying local-to-remote changes and optionally import them into local YAML with confirmation.
+
+### Changed
+
+- Update GitHub Actions for Node 24.
+- Guard the Nix `nativeBuildInputs` build fixups against newer nixpkgs/uv2nix revisions.
+
 ## v0.3.0 – 2026-05-31
 
 ### Added
