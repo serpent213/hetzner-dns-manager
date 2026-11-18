@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Nix: build `hdem` into the virtualenv again; newer uv2nix honours `tool.uv.package = false` and left only the dependencies installed.
+
+### Changed
+
+- Upgrade locked dependencies (certifi, dnspython, urllib3, requests, idna, pygments, pytest and others) past known advisories. Ruff stays at 0.11.8 for now.
+
 ## v0.4.0 – 2026-07-12
 
 ### Added

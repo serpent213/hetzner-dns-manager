@@ -65,9 +65,6 @@ only-include = [
 [tool.hatch.build.targets.wheel]
 only-include = ["hdem.py", "README.md", "CHANGELOG.md", "LICENSE"]
 
-[tool.uv]
-package = false
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
